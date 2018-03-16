@@ -1,16 +1,16 @@
 #pragma once
 
-/* A struct that represents a list of words. */
-struct tokens;
+/* A struct that represents a list of commands splitted with special characters. (|, <, > ...) */
+struct command;
 
-/* Turn a string into a list of words. */
-struct tokens *tokenize(const char *line);
+/* Parse line entered in terminal. */
+struct command* parse(const char* line);
 
-/* How many words are there? */
-size_t tokens_get_length(struct tokens *tokens);
+/* How many commands are there? */
+size_t commands_get_length(struct command* cmds);
 
-/* Get me the Nth word (zero-indexed) */
-char *tokens_get_token(struct tokens *tokens, size_t n);
+/* Get me the Nth command (zero-indexed) */
+char** commands_get_cmd(struct command* cmds, size_t n);
 
 /* Free the memory */
-void tokens_destroy(struct tokens *tokens);
+void commands_destroy(struct command* cmds);

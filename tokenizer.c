@@ -3,16 +3,15 @@
 #include <string.h>
 #include "tokenizer.h"
 
-struct tokens {
-  size_t tokens_length;
-  char **tokens;
-  size_t buffers_length;
-  char **buffers;
+struct command {
+  size_t cmds_length;
+  char*** cmds;
 };
 
-static void *vector_push(char ***pointer, size_t *size, void *elem) {
-  *pointer = (char**) realloc(*pointer, sizeof(char *) * (*size + 1));
-  (*pointer)[*size] = elem;
+static void *vector_push(void* pointer, size_t* size, void* elem) {
+  void*** ptr = (void***)pointer;
+  *ptr = realloc(*ptr, sizeof(void*) * (*size + 1));
+  (*ptr)[*size] = elem;
   *size += 1;
   return elem;
 }
@@ -24,21 +23,22 @@ static void *copy_word(char *source, size_t n) {
   return word;
 }
 
-struct tokens *tokenize(const char *line) {
+struct command* parse(const char *line) {
   if (line == NULL) {
     return NULL;
   }
 
   static char token[4096];
   size_t n = 0, n_max = 4096;
-  struct tokens *tokens;
+  struct command* cmds;
   size_t line_length = strlen(line);
 
-  tokens = (struct tokens *) malloc(sizeof(struct tokens));
-  tokens->tokens_length = 0;
-  tokens->tokens = NULL;
-  tokens->buffers_length = 0;
-  tokens->buffers = NULL;
+  cmds = (struct command *) malloc(sizeof(struct command));
+  cmds->cmds_length = 0;
+  cmds->cmds = NULL;
+
+  char** cmd = NULL;
+  size_t cmd_len = 0;
 
   const int MODE_NORMAL = 0,
         MODE_SQUOTE = 1,
@@ -59,9 +59,16 @@ struct tokens *tokenize(const char *line) {
       } else if (isspace(c)) {
         if (n > 0) {
           void *word = copy_word(token, n);
-          vector_push(&tokens->tokens, &tokens->tokens_length, word);
+          vector_push(&cmd, &cmd_len, word);
           n = 0;
         }
+      } else if (c == '|') { // Pipe support.
+        // Lacks checking if | is first character in line.
+        vector_push(&cmd, &cmd_len, NULL); // Append NULL terminator.
+        vector_push(&cmds->cmds, &cmds->cmds_length, cmd);
+        cmd = NULL;
+        cmd_len = 0;
+        n = 0;
       } else {
         token[n++] = c;
       }
@@ -91,40 +98,46 @@ struct tokens *tokenize(const char *line) {
 
   if (n > 0) {
     void *word = copy_word(token, n);
-    vector_push(&tokens->tokens, &tokens->tokens_length, word);
-    n = 0;
+    vector_push(&cmd, &cmd_len, word);
   }
-  return tokens;
+  if (cmd_len != 0) {
+    vector_push(&cmd, &cmd_len, NULL); // Append NULL terminator.
+    vector_push(&cmds->cmds, &cmds->cmds_length, cmd);
+  }
+  return cmds;
 }
 
-size_t tokens_get_length(struct tokens *tokens) {
-  if (tokens == NULL) {
+size_t commands_get_length(struct command* cmds) {
+  if (cmds == NULL) {
     return 0;
   } else {
-    return tokens->tokens_length;
+    return cmds->cmds_length;
   }
 }
 
-char *tokens_get_token(struct tokens *tokens, size_t n) {
-  if (tokens == NULL || n >= tokens->tokens_length) {
+char** commands_get_cmd(struct command* cmds, size_t n) {
+  if (cmds == NULL || n >= cmds->cmds_length) {
     return NULL;
   } else {
-    return tokens->tokens[n];
+    return cmds->cmds[n];
   }
 }
 
-void tokens_destroy(struct tokens *tokens) {
-  if (tokens == NULL) {
+void commands_destroy(struct command* cmds) {
+  if (cmds == NULL) {
     return;
   }
-  for (int i = 0; i < tokens->tokens_length; i++) {
-    free(tokens->tokens[i]);
+  for (int i = 0; i < cmds->cmds_length; i++) {
+    char** cmd = cmds->cmds[i];
+    int index = 0;
+    while(1) {
+      if (cmd[index] == NULL) break;
+      free(cmd[index++]);
+    }
+    free(cmd);
   }
-  for (int i = 0; i < tokens->buffers_length; i++) {
-    free(tokens->buffers[i]);
+  if (cmds->cmds) {
+    free(cmds->cmds);
   }
-  if (tokens->tokens) {
-    free(tokens->tokens);
-  }
-  free(tokens);
+  free(cmds);
 }

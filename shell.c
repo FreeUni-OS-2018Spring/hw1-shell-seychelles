@@ -27,13 +27,13 @@ struct termios shell_tmodes;
 /* Process group id for the shell */
 pid_t shell_pgid;
 
-int cmd_exit(struct tokens *tokens);
-int cmd_help(struct tokens *tokens);
-int cmd_pwd(struct tokens *tokens);
-int cmd_cd(struct tokens *tokens);
+int cmd_exit(struct command *tokens);
+int cmd_help(struct command *tokens);
+int cmd_pwd(struct command *tokens);
+int cmd_cd(struct command *tokens);
 
 /* Built-in command functions take token array (see parse.h) and return int */
-typedef int cmd_fun_t(struct tokens *tokens);
+typedef int cmd_fun_t(struct command *tokens);
 
 /* Built-in command struct and lookup table */
 typedef struct fun_desc {
@@ -50,19 +50,19 @@ fun_desc_t cmd_table[] = {
 };
 
 /* Prints a helpful description for the given command */
-int cmd_help(unused struct tokens *tokens) {
+int cmd_help(unused struct command *tokens) {
   for (unsigned int i = 0; i < sizeof(cmd_table) / sizeof(fun_desc_t); i++)
     printf("%s - %s\n", cmd_table[i].cmd, cmd_table[i].doc);
   return 1;
 }
 
 /* Exits this shell */
-int cmd_exit(unused struct tokens *tokens) {
+int cmd_exit(unused struct command *tokens) {
   exit(0);
 }
 
 /* Prints working directory */
-int cmd_pwd(unused struct tokens *tokens) {
+int cmd_pwd(unused struct command *tokens) {
   char cwd[1024];
   if (getcwd(cwd, sizeof(cwd)) != NULL)
     fprintf(stdout, "%s\n", cwd);
@@ -72,8 +72,8 @@ int cmd_pwd(unused struct tokens *tokens) {
 }
 
 /* Changes working directory */
-int cmd_cd(struct tokens *tokens) {
-  char* path = tokens_get_token(tokens, 1);
+int cmd_cd(struct command *tokens) {
+  char* path = commands_get_cmd(tokens, 0)[1];
   if(chdir(path) != 0) {
     fprintf(stdout, "cd: %s: No such file or directory\n", path);
   }
@@ -125,11 +125,15 @@ int main(unused int argc, unused char *argv[]) {
     fprintf(stdout, "%d: ", line_num);
 
   while (fgets(line, 4096, stdin)) {
-    /* Split our line into words. */
-    struct tokens *tokens = tokenize(line);
+    /* Split our line into commands with it's arguments. */
+    struct command *tokens = parse(line);
 
     /* Find which built-in function to run. */
-    int fundex = lookup(tokens_get_token(tokens, 0));
+    int fundex = -1;
+    char** cmd = commands_get_cmd(tokens, 0);
+    if (cmd != NULL) {
+      fundex = lookup(cmd[0]);
+    }
 
     if (fundex >= 0) {
       cmd_table[fundex].fun(tokens);
@@ -143,7 +147,7 @@ int main(unused int argc, unused char *argv[]) {
       fprintf(stdout, "%d: ", ++line_num);
 
     /* Clean up memory */
-    tokens_destroy(tokens);
+    commands_destroy(tokens);
   }
 
   return 0;
