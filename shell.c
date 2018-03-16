@@ -88,6 +88,29 @@ int lookup(char cmd[]) {
   return -1;
 }
 
+int execute_command(struct command* command) {
+  char** args;
+  if (commands_get_length(command) > 1) {
+    // Pipes Handling
+  } else {
+    args = commands_get_cmd(command, 0);
+    if (access(args[0], 0) < 0) { // check if progrm exists.
+      return -1;
+    }
+    pid_t pid;
+    pid = fork(); /* fork a child process */
+    if (pid < 0) { /* error, Fork Failed */
+      return -1;
+    } else if (pid == 0) { /* child process */
+      execv(args[0], args);
+      exit(1); // if exec fails process dies.
+    } else { /* parent process */
+      wait(NULL);
+    }
+  }
+  return 0;
+}
+
 /* Intialization procedures for this shell */
 void init_shell() {
   /* Our shell is connected to standard input. */
@@ -126,20 +149,22 @@ int main(unused int argc, unused char *argv[]) {
 
   while (fgets(line, 4096, stdin)) {
     /* Split our line into commands with it's arguments. */
-    struct command *tokens = parse(line);
-
-    /* Find which built-in function to run. */
-    int fundex = -1;
-    char** cmd = commands_get_cmd(tokens, 0);
-    if (cmd != NULL) {
-      fundex = lookup(cmd[0]);
-    }
-
-    if (fundex >= 0) {
-      cmd_table[fundex].fun(tokens);
-    } else {
-      /* REPLACE this to run commands as programs. */
-      fprintf(stdout, "This shell doesn't know how to run programs.\n");
+    struct command* command = parse(line);
+    char** first_subcmd = commands_get_cmd(command, 0);
+    
+    if (strcmp(line, "\n") && first_subcmd != NULL) {
+      
+      /* Find which built-in function to run. */
+      int fundex = lookup(first_subcmd[0]);
+      if (fundex >= 0) {
+        cmd_table[fundex].fun(command);
+      } else {
+        /* REPLACE this to run commands as programs. */
+        int status = execute_command(command);
+        if (status != 0) {
+          fprintf(stdout, "This shell doesn't know how to run programs.\n");
+        }
+      }
     }
 
     if (shell_is_interactive)
@@ -147,7 +172,7 @@ int main(unused int argc, unused char *argv[]) {
       fprintf(stdout, "%d: ", ++line_num);
 
     /* Clean up memory */
-    commands_destroy(tokens);
+    commands_destroy(command);
   }
 
   return 0;

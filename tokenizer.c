@@ -63,7 +63,7 @@ struct command* parse(const char *line) {
           n = 0;
         }
       } else if (c == '|') { // Pipe support.
-        // Lacks checking if | is first character in line.
+        if (cmd_len == 0) return NULL; // Unsupported Syntax.
         vector_push(&cmd, &cmd_len, NULL); // Append NULL terminator.
         vector_push(&cmds->cmds, &cmds->cmds_length, cmd);
         cmd = NULL;
@@ -100,7 +100,7 @@ struct command* parse(const char *line) {
     void *word = copy_word(token, n);
     vector_push(&cmd, &cmd_len, word);
   }
-  if (cmd_len != 0) {
+  if (cmd_len > 0) {
     vector_push(&cmd, &cmd_len, NULL); // Append NULL terminator.
     vector_push(&cmds->cmds, &cmds->cmds_length, cmd);
   }
