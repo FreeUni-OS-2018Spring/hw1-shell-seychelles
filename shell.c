@@ -88,46 +88,52 @@ int lookup(char cmd[]) {
   return -1;
 }
 
-int redirected_execution(struct command* command) {
+/* Pipe redirection */
+int redirected_execution(struct command* full_command) {
+  char* program;
   char** args;
-  size_t commands_count = commands_get_length(command);
+  size_t commands_count = commands_get_length(full_command);
+  int fds1[2];
+  int fds2[2];
+  int* read_pipe = fds1; // Read from 0 write to 1.
+  int* write_pipe = fds2;
 
-  /* Prepare Pipes, they are not deallocated. */
-  int* pipe_fds[commands_count - 1];
-  for (int i = 0; i < commands_count - 1; i++) {
-    int* f_des = malloc(2 * sizeof(int)); // Read from 0 write to 1.
-    pipe(f_des);
-    pipe_fds[i] = f_des;
-  }
-  
   for (size_t i = 0; i < commands_count; i++) {
-    args = commands_get_cmd(command, i);
+    args = commands_get_cmd(full_command, i);
+    program = args[0];
+    if (i < commands_count - 1) {
+      pipe(write_pipe);
+    }
 
     pid_t pid = fork();
     if (pid < 0) {
       return -2;
     } else if (pid == 0) { /* Child Process */
-      /* Here all unused file descriptors must be closed, but are not in this code. */
       if (i == 0) { /* First process, only writes to pipe. */
-        dup2(pipe_fds[0][1], 1);
+        close(write_pipe[0]);
+        dup2(write_pipe[1], 1);
         // Here can be file input redirect.
       } else if (i == commands_count - 1) { /* Last process, only reads from pipe. */
-        dup2(pipe_fds[i - 1][0], 0);
+        dup2(read_pipe[0], 0);
         // Here can be file output redirect.
       } else { /* Middle process, reads from pipe and writes to next pipe. */
-        dup2(pipe_fds[i - 1][0], 0);
-        dup2(pipe_fds[i][1], 1);
+        close(write_pipe[0]);
+        dup2(read_pipe[0], 0);
+        dup2(write_pipe[1], 1);
       }
-      execv(args[0], args);
+      execv(program, args); // Checking for built in commands.
       exit(1);
     } else { /* Parent Process */
       if (i < commands_count - 1) {
-        close(pipe_fds[i][1]); // Close current write.
+        close(write_pipe[1]);
       }
       waitpid(pid, NULL, 0);
       if (i > 0) {
-        close(pipe_fds[i - 1][0]); // Close previous read.
+        close(read_pipe[0]);
       }
+      int* tmp = read_pipe;
+      read_pipe = write_pipe;
+      write_pipe = tmp;
     }
   }
   return 0;
@@ -136,19 +142,21 @@ int redirected_execution(struct command* command) {
 int execute_command(char** command) {
   int status = 1;
   int fundex = lookup(command[0]);
+  /* Find which built-in function to run. */
   if (fundex >= 0) {
     status = cmd_table[fundex].fun(command);
   } else {
     char* program = command[0];
     if (access(program, 0) < 0) { /* Check if program exists */
-      return -1; /* Does Not Exists */
+      printf("%s: command not found\n", program);
+      return 1;
     }
     pid_t pid = fork(); /* Create a child process */
     if (pid < 0) {
-      return -2; /* Fork Failed error */
+      return 1; /* Fork Failed error */
     } else if (pid == 0) { /* Child Process */
-      execv(program,command);
-      exit(1); // if exec fails process dies.
+      execv(program, command);
+      exit(1);
     } else { /* Parent Process */
       wait(&status);
     }
@@ -194,20 +202,15 @@ int main(unused int argc, unused char *argv[]) {
 
   while (fgets(line, 4096, stdin)) {
     /* Split our line into commands with it's arguments. */
-    struct command* command = parse(line);
-    char** first_subcmd = commands_get_cmd(command, 0);
+    struct command* full_command = parse(line);
+    char** command = commands_get_cmd(full_command, 0);
     
     if (strcmp(line, "\n")) {
-      if (first_subcmd != NULL) {
-        /* Find which built-in function to run. */
-        int status;
-        if (commands_get_length(command) > 1) { // Pipes Handling
-          status = redirected_execution(command);
+      if (command != NULL) {
+        if (commands_get_length(full_command) > 1) { // Pipes Handling
+          redirected_execution(full_command);
         } else {
-          status = execute_command(first_subcmd);
-        }
-        if (status != 0) {
-          fprintf(stdout, "This shell doesn't know how to run programs.\n");
+          execute_command(command);
         }
       } else {
         fprintf(stdout, "Syntax error!\n");
@@ -219,7 +222,7 @@ int main(unused int argc, unused char *argv[]) {
       fprintf(stdout, "%d: ", ++line_num);
 
     /* Clean up memory */
-    commands_destroy(command);
+    commands_destroy(full_command);
   }
 
   return 0;
