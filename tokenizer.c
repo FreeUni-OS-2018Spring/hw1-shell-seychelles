@@ -6,6 +6,8 @@
 struct command {
   size_t cmds_length;
   char*** cmds;
+  char* inp_file;
+  char* out_file;
 };
 
 static void *vector_push(void* pointer, size_t* size, void* elem) {
@@ -36,9 +38,12 @@ struct command* parse(const char *line) {
   cmds = (struct command *) malloc(sizeof(struct command));
   cmds->cmds_length = 0;
   cmds->cmds = NULL;
+  cmds->inp_file = NULL;
+  cmds->out_file = NULL;
 
   char** cmd = NULL;
   size_t cmd_len = 0;
+  int input_filename, output_filename = 0;
 
   const int MODE_NORMAL = 0,
         MODE_SQUOTE = 1,
@@ -58,17 +63,31 @@ struct command* parse(const char *line) {
         }
       } else if (isspace(c)) {
         if (n > 0) {
-          void *word = copy_word(token, n);
-          vector_push(&cmd, &cmd_len, word);
+          if (input_filename == 1) {
+            input_filename = 0;
+            cmds->inp_file = (char*)copy_word(token, n);
+          } else if (output_filename == 1) {
+            output_filename = 0;
+            cmds->out_file = (char*)copy_word(token, n);
+          } else {
+            void *word = copy_word(token, n);
+            vector_push(&cmd, &cmd_len, word);
+          }
           n = 0;
         }
       } else if (c == '|') { // Pipe support.
-        if (cmd_len == 0) return NULL; // Unsupported Syntax.
+        // There must be some command before pipe operator.
         vector_push(&cmd, &cmd_len, NULL); // Append NULL terminator.
         vector_push(&cmds->cmds, &cmds->cmds_length, cmd);
         cmd = NULL;
         cmd_len = 0;
         n = 0;
+      } else if (c == '<') {
+        // There must be some command before redirect operator.
+        input_filename = 1;
+      } else if (c == '>') {
+        // There must be some command before redirect operator.
+        output_filename = 1;
       } else {
         token[n++] = c;
       }
@@ -123,6 +142,14 @@ char** commands_get_cmd(struct command* cmds, size_t n) {
   }
 }
 
+char* commands_get_inp_file(struct command* cmds) {
+  return cmds->inp_file;
+}
+
+char* commands_get_out_file(struct command* cmds) {
+  return cmds->out_file;
+}
+
 void commands_destroy(struct command* cmds) {
   if (cmds == NULL) {
     return;
@@ -138,6 +165,12 @@ void commands_destroy(struct command* cmds) {
   }
   if (cmds->cmds) {
     free(cmds->cmds);
+  }
+  if (cmds->inp_file) {
+    free(cmds->inp_file);
+  }
+  if (cmds->out_file) {
+    free(cmds->out_file);
   }
   free(cmds);
 }
