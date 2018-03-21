@@ -1,7 +1,7 @@
+#include "tokenizer.h"
 #include <ctype.h>
 #include <stdlib.h>
 #include <string.h>
-#include "tokenizer.h"
 
 struct command {
   size_t cmds_length;
@@ -10,7 +10,7 @@ struct command {
   char* out_file;
 };
 
-static void *vector_push(void* pointer, size_t* size, void* elem) {
+static void* vector_push(void* pointer, size_t* size, void* elem) {
   void*** ptr = (void***)pointer;
   *ptr = realloc(*ptr, sizeof(void*) * (*size + 1));
   (*ptr)[*size] = elem;
@@ -18,14 +18,14 @@ static void *vector_push(void* pointer, size_t* size, void* elem) {
   return elem;
 }
 
-static void *copy_word(char *source, size_t n) {
+static void* copy_word(char* source, size_t n) {
   source[n] = '\0';
-  char *word = (char *) malloc(n + 1);
+  char* word = (char*)malloc(n + 1);
   strncpy(word, source, n + 1);
   return word;
 }
 
-struct command* parse(const char *line) {
+struct command* parse(const char* line) {
   if (line == NULL) {
     return NULL;
   }
@@ -35,7 +35,7 @@ struct command* parse(const char *line) {
   struct command* cmds;
   size_t line_length = strlen(line);
 
-  cmds = (struct command *) malloc(sizeof(struct command));
+  cmds = (struct command*)malloc(sizeof(struct command));
   cmds->cmds_length = 0;
   cmds->cmds = NULL;
   cmds->inp_file = NULL;
@@ -43,11 +43,10 @@ struct command* parse(const char *line) {
 
   char** cmd = NULL;
   size_t cmd_len = 0;
-  int input_filename, output_filename = 0;
+  int input_filename = 0;
+  int output_filename = 0;
 
-  const int MODE_NORMAL = 0,
-        MODE_SQUOTE = 1,
-        MODE_DQUOTE = 2;
+  const int MODE_NORMAL = 0, MODE_SQUOTE = 1, MODE_DQUOTE = 2;
   int mode = MODE_NORMAL;
 
   for (unsigned int i = 0; i < line_length; i++) {
@@ -70,14 +69,14 @@ struct command* parse(const char *line) {
             output_filename = 0;
             cmds->out_file = (char*)copy_word(token, n);
           } else {
-            void *word = copy_word(token, n);
+            void* word = copy_word(token, n);
             vector_push(&cmd, &cmd_len, word);
           }
           n = 0;
         }
-      } else if (c == '|') { // Pipe support.
+      } else if (c == '|') {  // Pipe support.
         // There must be some command before pipe operator.
-        vector_push(&cmd, &cmd_len, NULL); // Append NULL terminator.
+        vector_push(&cmd, &cmd_len, NULL);  // Append NULL terminator.
         vector_push(&cmds->cmds, &cmds->cmds_length, cmd);
         cmd = NULL;
         cmd_len = 0;
@@ -116,11 +115,11 @@ struct command* parse(const char *line) {
   }
 
   if (n > 0) {
-    void *word = copy_word(token, n);
+    void* word = copy_word(token, n);
     vector_push(&cmd, &cmd_len, word);
   }
   if (cmd_len > 0) {
-    vector_push(&cmd, &cmd_len, NULL); // Append NULL terminator.
+    vector_push(&cmd, &cmd_len, NULL);  // Append NULL terminator.
     vector_push(&cmds->cmds, &cmds->cmds_length, cmd);
   }
   return cmds;
@@ -142,13 +141,9 @@ char** commands_get_cmd(struct command* cmds, size_t n) {
   }
 }
 
-char* commands_get_inp_file(struct command* cmds) {
-  return cmds->inp_file;
-}
+char* commands_get_inp_file(struct command* cmds) { return cmds->inp_file; }
 
-char* commands_get_out_file(struct command* cmds) {
-  return cmds->out_file;
-}
+char* commands_get_out_file(struct command* cmds) { return cmds->out_file; }
 
 void commands_destroy(struct command* cmds) {
   if (cmds == NULL) {
@@ -157,7 +152,7 @@ void commands_destroy(struct command* cmds) {
   for (int i = 0; i < cmds->cmds_length; i++) {
     char** cmd = cmds->cmds[i];
     int index = 0;
-    while(1) {
+    while (1) {
       if (cmd[index] == NULL) break;
       free(cmd[index++]);
     }
