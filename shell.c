@@ -157,10 +157,10 @@ char* find_program(char* program_path) {
       // concatenate (current_env) and (program_sufix_path)
       char res[strlen(current_env) + strlen(program_sufix_path)];
 
-      strcpy(res, &current_env);
-      strcpy(res + strlen(current_env), &program_sufix_path);
-      if (access(&res, 0) >= 0) {
-        return strdup(&res);
+      strcpy(res, (const char*)&current_env);
+      strcpy(res + strlen(current_env), (const char*)&program_sufix_path);
+      if (access((const char*)&res, 0) >= 0) {
+        return strdup((const char*)&res);
       }
       start = i + 1;
     }
@@ -168,10 +168,10 @@ char* find_program(char* program_path) {
   // if input program_path is at the end of the PATH
   char last_attempt[strlen(&env[start]) + strlen(program_sufix_path)];
   strcpy(last_attempt, &env[start]);
-  strcpy(last_attempt + strlen(&env[start]), &program_sufix_path);
+  strcpy(last_attempt + strlen(&env[start]), (const char*)&program_sufix_path);
 
-  if (access(&last_attempt, 0) >= 0) {
-    return strdup(&last_attempt);
+  if (access((const char*)&last_attempt, 0) >= 0) {
+    return strdup((const char*)&last_attempt);
   }
 
   /* Here must be search in PATH */
