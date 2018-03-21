@@ -9,6 +9,7 @@
 #include <sys/wait.h>
 #include <termios.h>
 #include <unistd.h>
+#include <fcntl.h>
 
 #include "tokenizer.h"
 
@@ -133,11 +134,54 @@ int lookup(char cmd[]) {
   return -1;
 }
 
-/* Pipe redirection */
-int redirected_execution(struct command* full_command) {
-  char* program;
+/* Checks if program exists and if not searching in PATH */
+char* find_program(char* program_path) {
+  if (access(program_path, 0) >= 0) {
+    return program_path;
+  }
+
+  char program_sufix_path[strlen(program_path)+1];
+  char* res="/";
+  strcpy(program_sufix_path, res);
+  strcpy(program_sufix_path+1, program_path); //  example ->  program_sufix_path="/program_path"
+
+  char* env = getenv("PATH");
+
+  int start=0;
+  for (int i=0;i<strlen(env);i++){
+  	if(env[i]==':'){
+  		char current_env[i-start+1];
+  		strncpy(current_env, &env[start],i-start);
+  		current_env[i-start]='\0';
+  		// concatenate (current_env) and (program_sufix_path)
+  		char res[strlen(current_env)+strlen(program_sufix_path)];
+
+  		strcpy(res, &current_env);
+  		strcpy(res+strlen(current_env), &program_sufix_path);
+   	  	if(access(&res,0)>=0){
+   	  		return strdup(&res);
+   	  	}
+   	  	start=i+1;
+   	  }
+   	}
+   	// if input program_path is at the end of the PATH
+  	char last_attempt[strlen(&env[start])+strlen(program_sufix_path)];
+  	strcpy(last_attempt, &env[start]);
+  	strcpy(last_attempt+strlen(&env[start]), &program_sufix_path);
+
+	if(access(&last_attempt,0)>=0){
+		return strdup(&last_attempt);
+	}
+
+  /* Here must be search in PATH */
+  fprintf(stderr, "%s:command not found\n", program_path);
+  return NULL;
+}
+
+int redirected_execution(struct command* full_command, int inp_fd, int out_fd) {
   char** args;
   size_t commands_count = commands_get_length(full_command);
+  int status = 1;
   int fds1[2];
   int fds2[2];
   int* read_pipe = fds1;  // Read from 0 write to 1.
@@ -145,15 +189,14 @@ int redirected_execution(struct command* full_command) {
 
   for (size_t i = 0; i < commands_count; i++) {
     args = commands_get_cmd(full_command, i);
-    program = args[0];
-    if (i < commands_count - 1) {
-      pipe(write_pipe);
-    }
+    if (i < commands_count - 1) pipe(write_pipe);
 
     pid_t pid = fork();
     if (pid < 0) {
-      return -2;
+      fprintf(stderr, "Creating child process failed\n");
+      return 1;
     } else if (pid == 0) { /* Child Process */
+<<<<<<< HEAD
       if (i == 0) {        /* First process, only writes to pipe. */
         close(write_pipe[0]);
         dup2(write_pipe[1], 1);
@@ -163,10 +206,31 @@ int redirected_execution(struct command* full_command) {
         dup2(read_pipe[0], 0);
         // Here can be file output redirect.
       } else { /* Middle process, reads from pipe and writes to next pipe. */
+=======
+      if (i == 0) { /* First process, only writes to pipe. */
+        if (commands_count != 1) { /* pipeless case */
+          close(write_pipe[0]);
+          dup2(write_pipe[1], STDOUT_FILENO);
+        }
+        if (inp_fd != STDIN_FILENO) {
+          dup2(inp_fd, STDIN_FILENO);
+        }
+      }
+      if (i == commands_count - 1) { /* Last process, only reads from pipe. */
+        if (commands_count != 1) { /* pipeless case */
+          dup2(read_pipe[0], STDIN_FILENO);
+        }
+        if (out_fd != STDOUT_FILENO) {
+          dup2(out_fd, STDOUT_FILENO);
+        }
+      } 
+      if(i != 0 && i != commands_count - 1) { /* Middle process, reads from pipe and writes to next pipe. */
+>>>>>>> f436b48190c4a0cd4e046ee2a4546ede2c15f9da
         close(write_pipe[0]);
         dup2(read_pipe[0], 0);
         dup2(write_pipe[1], 1);
       }
+<<<<<<< HEAD
       execv(program, args);  // Checking for built in commands.
       exit(1);
     } else { /* Parent Process */
@@ -176,32 +240,49 @@ int redirected_execution(struct command* full_command) {
       waitpid(pid, NULL, 0);
       if (i > 0) {
         close(read_pipe[0]);
+=======
+
+      int fundex = lookup(args[0]);
+      if (fundex >= 0) {
+        int status = cmd_table[fundex].fun(args);
+        exit(status);
+      } else {
+        char* program_path = find_program(args[0]);
+        if (program_path != NULL) execv(program_path, args);
+        exit(1);
+>>>>>>> f436b48190c4a0cd4e046ee2a4546ede2c15f9da
       }
+
+    } else { /* Parent Process */
+      if (i < commands_count - 1) close(write_pipe[1]);
+      waitpid(pid, &status, 0);
+      if (i > 0) close(read_pipe[0]);
       int* tmp = read_pipe;
       read_pipe = write_pipe;
       write_pipe = tmp;
     }
   }
-  return 0;
+  return status;
 }
 
-int execute_command(char** command) {
+int execute_command(char** args) {
   int status = 1;
-  int fundex = lookup(command[0]);
-  /* Find which built-in function to run. */
+  int fundex = lookup(args[0]); /* Find which built-in function to run. */
   if (fundex >= 0) {
-    status = cmd_table[fundex].fun(command);
+    status = cmd_table[fundex].fun(args);
   } else {
-    char* program = command[0];
-    if (access(program, 0) < 0) { /* Check if program exists */
-      printf("%s: command not found\n", program);
-      return 1;
-    }
-    pid_t pid = fork(); /* Create a child process */
+    char* program_path = find_program(args[0]);
+    if (program_path == NULL) return status;
+    pid_t pid = fork();
     if (pid < 0) {
+<<<<<<< HEAD
       return 1;            /* Fork Failed error */
+=======
+      fprintf(stderr, "Creating child process failed\n");
+      return 1;
+>>>>>>> f436b48190c4a0cd4e046ee2a4546ede2c15f9da
     } else if (pid == 0) { /* Child Process */
-      execv(program, command);
+      execv(program_path, args);
       exit(1);
     } else { /* Parent Process */
       wait(&status);
@@ -248,6 +329,7 @@ int main(unused int argc, unused char* argv[]) {
   while (fgets(line, 4096, stdin)) {
     /* Split our line into commands with it's arguments. */
     struct command* full_command = parse(line);
+<<<<<<< HEAD
     char** command = commands_get_cmd(full_command, 0);
 
     if (strcmp(line, "\n")) {
@@ -256,10 +338,54 @@ int main(unused int argc, unused char* argv[]) {
           redirected_execution(full_command);
         } else {
           execute_command(command);
+=======
+    
+    int inp_fd = STDIN_FILENO;
+    int out_fd = STDOUT_FILENO;
+    int is_redirection = 0;
+
+    if (strcmp(line, "\n")) {
+      if (full_command != NULL) { // Valid input
+
+        char* filename;
+        if ((filename = commands_get_inp_file(full_command)) != NULL) {
+          int fd = open(filename, O_RDONLY);
+          if (fd != -1) {
+            inp_fd = fd;
+            is_redirection = 1;
+          } else {
+            fprintf(stderr, "%s: could not open file\n", filename);
+            is_redirection = -1;
+          }
+        }
+        if ((filename = commands_get_out_file(full_command)) != NULL) {
+          mode_t f_mode = S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP | S_IROTH;
+          int fd = open(filename, O_WRONLY | O_CREAT | O_TRUNC, f_mode);
+          if (fd != -1) {
+            out_fd = fd;
+            is_redirection = 1;
+          } else {
+            fprintf(stderr, "%s: could not create file\n", filename);
+            is_redirection = -1;
+          }
+        }
+
+        if (commands_get_length(full_command) > 1 || is_redirection == 1) { // Pipes
+          redirected_execution(full_command, inp_fd, out_fd);
+        } else if (is_redirection == 0) {
+          execute_command(commands_get_cmd(full_command, 0));
+>>>>>>> f436b48190c4a0cd4e046ee2a4546ede2c15f9da
         }
       } else {
-        fprintf(stdout, "Syntax error!\n");
+        fprintf(stderr, "Syntax error!\n");
       }
+    }
+
+    if (inp_fd != STDIN_FILENO) {
+      close(inp_fd);
+    }
+    if (out_fd != STDOUT_FILENO) {
+      close(out_fd);
     }
 
     if (shell_is_interactive)
