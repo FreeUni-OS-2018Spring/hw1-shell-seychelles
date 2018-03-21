@@ -10,7 +10,7 @@
 #include <sys/wait.h>
 #include <termios.h>
 #include <unistd.h>
-
+#include <fcntl.h>
 #include "tokenizer.h"
 
 /* Convenience macro to silence compiler warnings about unused function
@@ -180,25 +180,25 @@ char* find_program(char* program_path) {
 }
 
 int redirected_execution(struct command* full_command, int inp_fd, int out_fd) {
-  char** args;
-  size_t commands_count = commands_get_length(full_command);
   int status = 1;
   int fds1[2];
   int fds2[2];
-  int* read_pipe = fds1;  // Read from 0 write to 1.
+  int* read_pipe = fds1; // Read from 0 write to 1.
   int* write_pipe = fds2;
 
-  for (size_t i = 0; i < commands_count; i++) {
-    args = commands_get_cmd(full_command, i);
-    if (i < commands_count - 1) pipe(write_pipe);
+  for (size_t i = 0; i < full_command->cmds_length; i++) {
+    char** args = command_get_cmd(full_command, i);
+
+    if (i < full_command->cmds_length - 1) /* Don't create pipe for last process */
+      pipe(write_pipe);
 
     pid_t pid = fork();
     if (pid < 0) {
       fprintf(stderr, "Creating child process failed\n");
       return 1;
-    } else if (pid == 0) {         /* Child Process */
-      if (i == 0) {                /* First process, only writes to pipe. */
-        if (commands_count != 1) { /* pipeless case */
+    } else if (pid == 0) { /* Child Process */
+      if (i == 0) { /* First process, only writes to pipe. */
+        if (full_command->cmds_length != 1) { /* Check for pipeless case */
           close(write_pipe[0]);
           dup2(write_pipe[1], STDOUT_FILENO);
         }
@@ -206,40 +206,41 @@ int redirected_execution(struct command* full_command, int inp_fd, int out_fd) {
           dup2(inp_fd, STDIN_FILENO);
         }
       }
-      if (i == commands_count - 1) { /* Last process, only reads from pipe. */
-        if (commands_count != 1) {   /* pipeless case */
+      if (i == full_command->cmds_length - 1) { /* Last process, only reads from pipe. */
+        if (full_command->cmds_length != 1) { /* Check for pipeless case */
           dup2(read_pipe[0], STDIN_FILENO);
         }
         if (out_fd != STDOUT_FILENO) {
           dup2(out_fd, STDOUT_FILENO);
         }
-      }
-      if (i != 0 &&
-          i != commands_count - 1) { /* Middle process, reads from pipe and
-                                        writes to next pipe. */
+      } 
+      if(i != 0 && i != full_command->cmds_length - 1) { /* Middle process, reads from pipe and writes to next pipe. */
         close(write_pipe[0]);
         dup2(read_pipe[0], 0);
         dup2(write_pipe[1], 1);
       }
-
+    
       int fundex = lookup(args[0]);
       if (fundex >= 0) {
         int status = cmd_table[fundex].fun(args);
         exit(status);
       } else {
         char* program_path = find_program(args[0]);
-        if (program_path != NULL) execv(program_path, args);
+        if (program_path == NULL) exit(1);
+        execv(program_path, args);
         exit(1);
       }
+
     } else { /* Parent Process */
-      if (i < commands_count - 1) close(write_pipe[1]);
-      waitpid(pid, &status, 0);
+      if (i < full_command->cmds_length - 1) close(write_pipe[1]);
       if (i > 0) close(read_pipe[0]);
       int* tmp = read_pipe;
       read_pipe = write_pipe;
       write_pipe = tmp;
     }
   }
+  for (size_t i = 0; i < full_command->cmds_length; i++) /* Wait for all childs */
+    wait(&status);
   return status;
 }
 
@@ -311,45 +312,41 @@ int main(unused int argc, unused char* argv[]) {
     if (strcmp(line, "\n")) {
       if (full_command != NULL) {  // Valid input
 
-        char* filename;
-        if ((filename = commands_get_inp_file(full_command)) != NULL) {
-          int fd = open(filename, O_RDONLY);
+        if (full_command->inp_file != NULL) { // Prepare file if neccessary
+          int fd = open(full_command->inp_file, O_RDONLY);
           if (fd != -1) {
             inp_fd = fd;
             is_redirection = 1;
           } else {
-            fprintf(stderr, "%s: could not open file\n", filename);
+            fprintf(stderr, "%s: could not open file\n", full_command->inp_file);
             is_redirection = -1;
           }
         }
-        if ((filename = commands_get_out_file(full_command)) != NULL) {
+        if (full_command->out_file != NULL) { // Prepare file if neccessary
           mode_t f_mode = S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP | S_IROTH;
-          int fd = open(filename, O_WRONLY | O_CREAT | O_TRUNC, f_mode);
+          int f_flags;
+          if (full_command->append_to_file == 1) f_flags = O_WRONLY | O_CREAT | O_APPEND;
+          else f_flags = O_WRONLY | O_CREAT | O_TRUNC;
+          int fd = open(full_command->out_file, f_flags, f_mode);
           if (fd != -1) {
             out_fd = fd;
             is_redirection = 1;
           } else {
-            fprintf(stderr, "%s: could not create file\n", filename);
+            fprintf(stderr, "%s: could not open file\n", full_command->out_file);
             is_redirection = -1;
           }
         }
 
-        if (commands_get_length(full_command) > 1 ||
-            is_redirection == 1) {  // Pipes
+        if (full_command->cmds_length > 1 || is_redirection == 1) { // Pipes and redirection.
           redirected_execution(full_command, inp_fd, out_fd);
+          if (inp_fd != STDIN_FILENO) close(inp_fd);
+          if (out_fd != STDOUT_FILENO) close(out_fd);
         } else if (is_redirection == 0) {
-          execute_command(commands_get_cmd(full_command, 0));
+          execute_command(command_get_cmd(full_command, 0));
         }
       } else {
         fprintf(stderr, "Syntax error!\n");
       }
-    }
-
-    if (inp_fd != STDIN_FILENO) {
-      close(inp_fd);
-    }
-    if (out_fd != STDOUT_FILENO) {
-      close(out_fd);
     }
 
     if (shell_is_interactive)
@@ -357,7 +354,7 @@ int main(unused int argc, unused char* argv[]) {
       fprintf(stdout, "%d: ", ++line_num);
 
     /* Clean up memory */
-    commands_destroy(full_command);
+    command_destroy(full_command);
   }
 
   return 0;
