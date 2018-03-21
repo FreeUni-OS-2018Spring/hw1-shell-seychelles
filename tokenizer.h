@@ -1,4 +1,5 @@
 #pragma once
+#include <stddef.h>
 
 /* A struct that represents a list of commands splitted with special characters. (|, <, > ...) */
 struct command;
