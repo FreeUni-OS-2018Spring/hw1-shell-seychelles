@@ -95,33 +95,30 @@ char* find_program(char* program_path) {
     return program_path;
   }
 
-  	char program_sufix_path[strlen(program_path)+1];
-    char* res="/";
-    strcpy(program_sufix_path, res);
-    strcpy(program_sufix_path+1, program_path); //  example ->  program_sufix_path="/program_path"
+  char program_sufix_path[strlen(program_path)+1];
+  char* res="/";
+  strcpy(program_sufix_path, res);
+  strcpy(program_sufix_path+1, program_path); //  example ->  program_sufix_path="/program_path"
 
-    char* env = getenv("PATH");
+  char* env = getenv("PATH");
 
-   	int start=0;
-   	for (int i=0;i<strlen(env);i++){
-   		if(env[i]==':'){
-  			char current_env[i-start+1];
-  		    strncpy(current_env, &env[start],i-start);
-  		    current_env[i-start]='\0';
+  int start=0;
+  for (int i=0;i<strlen(env);i++){
+  	if(env[i]==':'){
+  		char current_env[i-start+1];
+  		strncpy(current_env, &env[start],i-start);
+  		current_env[i-start]='\0';
+  		// concatenate (current_env) and (program_sufix_path)
+  		char res[strlen(current_env)+strlen(program_sufix_path)];
 
-  		    // concatenate (current_env) and (program_sufix_path)
-  		    char res[strlen(current_env)+strlen(program_sufix_path)];
-
-  		    strcpy(res, &current_env);
-  		    strcpy(res+strlen(current_env), &program_sufix_path);
-
-    	  	if(access(&res,0)>=0){
-    	  		 return strdup(&res);
-    	  	}
-   			  start=i+1;
-   		}
+  		strcpy(res, &current_env);
+  		strcpy(res+strlen(current_env), &program_sufix_path);
+   	  	if(access(&res,0)>=0){
+   	  		return strdup(&res);
+   	  	}
+   	  	start=i+1;
+   	  }
    	}
-
    	// if input program_path is at the end of the PATH
   	char last_attempt[strlen(&env[start])+strlen(program_sufix_path)];
   	strcpy(last_attempt, &env[start]);
@@ -129,7 +126,7 @@ char* find_program(char* program_path) {
 
 	if(access(&last_attempt,0)>=0){
 		return strdup(&last_attempt);
-    }
+	}
 
   /* Here must be search in PATH */
   fprintf(stderr, "%s:command not found\n", program_path);
