@@ -9,6 +9,7 @@
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <termios.h>
+#include <ulimit.h>
 #include <unistd.h>
 
 #include "tokenizer.h"
@@ -35,6 +36,7 @@ int cmd_pwd(char** command);
 int cmd_cd(char** command);
 int cmd_ulimit(char** command);
 int cmd_kill(char** command);
+int cmd_type(char** command);
 
 /* Built-in command functions take token array (see parse.h) and return int */
 typedef int cmd_fun_t(char** command);
@@ -53,7 +55,7 @@ fun_desc_t cmd_table[] = {
     {cmd_cd, "cd", "change directory"},
     {cmd_ulimit, "ulimit", "modify shell resource limits"},
     {cmd_kill, "kill", "send signal to a process"},
-};
+    {cmd_type, "type", "display information about command type"}};
 
 /* Prints a helpful description for the given command */
 int cmd_help(unused char** command) {
@@ -126,6 +128,11 @@ int cmd_kill(char** command) {
 }
 
 int cmd_ulimit(char** command) { return 1; }
+
+int cmd_type(char** command) {
+  // >>>>>>>>>>>>>>>MISHIKO<<<<<<<<<<<<<<<<ROMEL>>>>>>>>>>>KLASSHI<<<<<<<<<<<XAR>>>>>>>>>>?
+  return 1;  // change this to 0 on success
+}
 
 /* Looks up the built-in command, if it exists. */
 int lookup(char cmd[]) {
@@ -274,9 +281,10 @@ void init_shell() {
   shell_is_interactive = isatty(shell_terminal);
 
   if (shell_is_interactive) {
-    /* If the shell is not currently in the foreground, we must pause the shell
-     * until it becomes a foreground process. We use SIGTTIN to pause the shell.
-     * When the shell gets moved to the foreground, we'll receive a SIGCONT. */
+    /* If the shell is not currently in the foreground, we must pause the
+     * shell until it becomes a foreground process. We use SIGTTIN to pause
+     * the shell. When the shell gets moved to the foreground, we'll receive a
+     * SIGCONT. */
     while (tcgetpgrp(shell_terminal) != (shell_pgid = getpgrp()))
       kill(-shell_pgid, SIGTTIN);
 
