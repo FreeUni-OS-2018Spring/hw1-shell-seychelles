@@ -240,7 +240,7 @@ int lookup(char cmd[]) {
 
 /* Checks if program exists and if not searching in PATH */
 // >show_all_results< parameter says if method should print/log the paths
-char* find_program(char* program_path,int show_all_results) {
+char* find_program(char* program_path,int show_all_results, int is_builtin) {
   if (access(program_path, 0) >= 0) {
     return program_path;
   }
@@ -298,7 +298,9 @@ char* find_program(char* program_path,int show_all_results) {
   }
 
   /* Here must be search in PATH */
-  fprintf(stderr, "%s:command not found\n", program_path);
+  if(is_builtin==-1){
+  	fprintf(stderr, "%s: command not found\n", program_path);
+  }
   return NULL;
 }
 
@@ -308,7 +310,7 @@ int cmd_type(char** command) {
   	if(have_command!=-1){
   		fprintf(stderr, "%s is a shell builtin\n", current_command);
   	}
-	find_program(current_command,1);
+	find_program(current_command,1,have_command);
   return 0;
 }
 
@@ -362,7 +364,7 @@ int redirected_execution(struct command* full_command, int inp_fd, int out_fd) {
         int status = cmd_table[fundex].fun(args);
         exit(status);
       } else {
-        char* program_path = find_program(args[0],0);
+        char* program_path = find_program(args[0],0,-1);
         if (program_path == NULL) exit(1);
         execv(program_path, args);
         exit(1);
@@ -390,7 +392,7 @@ int execute_command(char** args) {
   if (fundex >= 0) {
     status = cmd_table[fundex].fun(args);
   } else {
-    char* program_path = find_program(args[0],0);
+    char* program_path = find_program(args[0],0,-1);
     if (program_path == NULL) return status;
     pid_t pid = fork();
     if (pid < 0) {
