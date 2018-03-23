@@ -380,7 +380,7 @@ int redirected_execution(struct command* full_command, int inp_fd, int out_fd) {
     }
   }
   for (size_t i = 0; i < full_command->cmds_length; i++) /* Wait for all childs */
-    wait(-1, &status, WSTOPPED);
+    waitpid(-1, &status, WSTOPPED);
   return status;
 }
 
