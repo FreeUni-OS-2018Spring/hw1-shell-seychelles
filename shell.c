@@ -47,6 +47,7 @@ int cmd_cd(char** command);
 int cmd_ulimit(char** command);
 int cmd_kill(char** command);
 int cmd_type(char** command);
+int cmd_echo(char** command);
 
 /* Built-in command functions take token array (see parse.h) and return int */
 typedef int cmd_fun_t(char** command);
@@ -65,7 +66,8 @@ fun_desc_t cmd_table[] = {
     {cmd_cd, "cd", "change directory"},
     {cmd_ulimit, "ulimit", "modify shell resource limits"},
     {cmd_kill, "kill", "send signal to a process"},
-    {cmd_type, "type", "display information about command type"}};
+    {cmd_type, "type", "display information about command type"},
+    {cmd_echo, "echo", "prints input to standard output"}};
 
 /* Prints a helpful description for the given command */
 int cmd_help(unused char** command) {
@@ -229,15 +231,12 @@ int cmd_ulimit(char** command) {
   return 1;
 }
 
-
 /* Looks up the built-in command, if it exists. */
 int lookup(char cmd[]) {
   for (unsigned int i = 0; i < sizeof(cmd_table) / sizeof(fun_desc_t); i++)
     if (cmd && (strcmp(cmd_table[i].cmd, cmd) == 0)) return i;
   return -1;
 }
-
-int cmd_type(char** command);
 
 /* Checks if program exists and if not searching in PATH */
 // >show_all_results< parameter says if method should print/log the paths
@@ -313,6 +312,9 @@ int cmd_type(char** command) {
   return 0;
 }
 
+int cmd_echo(char** command) {
+  return 0;
+}
 
 int redirected_execution(struct command* full_command, int inp_fd, int out_fd) {
   int status = 1;
@@ -324,8 +326,7 @@ int redirected_execution(struct command* full_command, int inp_fd, int out_fd) {
   for (size_t i = 0; i < full_command->cmds_length; i++) {
     char** args = command_get_cmd(full_command, i);
 
-    if (i <
-        full_command->cmds_length - 1) /* Don't create pipe for last process */
+    if (i < full_command->cmds_length - 1) /* Don't create pipe for last process */
       pipe(write_pipe);
 
     pid_t pid = fork();
@@ -333,7 +334,7 @@ int redirected_execution(struct command* full_command, int inp_fd, int out_fd) {
       fprintf(stderr, "Creating child process failed\n");
       return 1;
     } else if (pid == 0) { /* Child Process */
-      if (i == 0) {        /* First process, only writes to pipe. */
+      if (i == 0) { /* First process, only writes to pipe. */
         if (full_command->cmds_length != 1) { /* Check for pipeless case */
           close(write_pipe[0]);
           dup2(write_pipe[1], STDOUT_FILENO);
@@ -342,8 +343,7 @@ int redirected_execution(struct command* full_command, int inp_fd, int out_fd) {
           dup2(inp_fd, STDIN_FILENO);
         }
       }
-      if (i == full_command->cmds_length -
-                   1) { /* Last process, only reads from pipe. */
+      if (i == full_command->cmds_length - 1) { /* Last process, only reads from pipe. */
         if (full_command->cmds_length != 1) { /* Check for pipeless case */
           dup2(read_pipe[0], STDIN_FILENO);
         }
@@ -351,10 +351,7 @@ int redirected_execution(struct command* full_command, int inp_fd, int out_fd) {
           dup2(out_fd, STDOUT_FILENO);
         }
       }
-      if (i != 0 &&
-          i != full_command->cmds_length -
-                   1) { /* Middle process, reads from pipe and writes to next
-                           pipe. */
+      if (i != 0 && i != full_command->cmds_length - 1) { /* Middle process, reads from pipe and writes to next pipe. */
         close(write_pipe[0]);
         dup2(read_pipe[0], 0);
         dup2(write_pipe[1], 1);
@@ -383,7 +380,7 @@ int redirected_execution(struct command* full_command, int inp_fd, int out_fd) {
     }
   }
   for (size_t i = 0; i < full_command->cmds_length; i++) /* Wait for all childs */
-    waitpid(-1, &status, WSTOPPED);
+    wait(-1, &status, WSTOPPED);
   return status;
 }
 
@@ -441,23 +438,13 @@ void init_shell() {
 }
 
 void signal_handler(int signum) {
-  if (signum == SIGINT) {
-    if (active_pid != -1) {
+  if (active_pid != -1) {
       active_pid = -1;
-      kill(active_pid, SIGINT);
+      kill(active_pid, signum);
     } else if (active_pgid != -1) {
       active_pgid = -1;
-      killpg(active_pgid, SIGINT);
+      killpg(active_pgid, signum);
     }
-  } else if (signum == SIGTSTP) {
-    if (active_pid != -1) {
-      active_pid = -1;
-      kill(active_pid, SIGTSTP);
-    } else if (active_pgid != -1) {
-      active_pgid = -1;
-      killpg(active_pgid, SIGTSTP);
-    }
-  }
 }
 
 int main(unused int argc, unused char* argv[]) {
@@ -506,8 +493,7 @@ int main(unused int argc, unused char* argv[]) {
             out_fd = fd;
             is_redirection = 1;
           } else {
-            fprintf(stderr, "%s: could not open file\n",
-                    full_command->out_file);
+            fprintf(stderr, "%s: could not open file\n", full_command->out_file);
             is_redirection = -1;
           }
         }
