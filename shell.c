@@ -220,10 +220,6 @@ int cmd_ulimit(char** command) {
   return 1;
 }
 
-int cmd_type(char** command) {
-  // >>>>>>>>>>>>>>>MISHIKO<<<<<<<<<<<<<<<<ROMEL>>>>>>>>>>>KLASSHI<<<<<<<<<<<XAR>>>>>>>>>>?
-  return 1;  // change this to 0 on success
-}
 
 /* Looks up the built-in command, if it exists. */
 int lookup(char cmd[]) {
@@ -232,8 +228,11 @@ int lookup(char cmd[]) {
   return -1;
 }
 
+int cmd_type(char** command);
+
 /* Checks if program exists and if not searching in PATH */
-char* find_program(char* program_path) {
+// >show_all_results< parameter says if method should print/log the paths
+char* find_program(char* program_path,int show_all_results) {
   if (access(program_path, 0) >= 0) {
     return program_path;
   }
@@ -247,6 +246,8 @@ char* find_program(char* program_path) {
   char* env = getenv("PATH");
 
   int start = 0;
+
+  char* final_res=NULL;
   for (int i = 0; i < strlen(env); i++) {
     if (env[i] == ':') {
       char current_env[i - start + 1];
@@ -258,7 +259,14 @@ char* find_program(char* program_path) {
       strcpy(res, (const char*)&current_env);
       strcpy(res + strlen(current_env), (const char*)&program_sufix_path);
       if (access((const char*)&res, 0) >= 0) {
-        return strdup((const char*)&res);
+      	if(show_all_results!=0){
+      		fprintf(stderr, "%s is %s\n",program_path, res);
+      	}
+
+      	if(final_res==NULL){
+      		final_res=strdup((const char*)&res);
+      	}
+        //return strdup((const char*)&res);
       }
       start = i + 1;
     }
@@ -269,13 +277,33 @@ char* find_program(char* program_path) {
   strcpy(last_attempt + strlen(&env[start]), (const char*)&program_sufix_path);
 
   if (access((const char*)&last_attempt, 0) >= 0) {
-    return strdup((const char*)&last_attempt);
+  	if(show_all_results!=0){
+  		fprintf(stderr, "%s is %s\n",program_path, last_attempt);
+  	}
+  	if(final_res==NULL){
+  		final_res=strdup((const char*)&last_attempt);
+  	}
+    //return strdup((const char*)&last_attempt);
+  }
+  if(final_res!=NULL){
+  	return final_res;
   }
 
   /* Here must be search in PATH */
   fprintf(stderr, "%s:command not found\n", program_path);
   return NULL;
 }
+
+int cmd_type(char** command) {
+  	char* current_command=command[1];
+  	int have_command =  lookup(current_command);
+  	if(have_command!=-1){
+  		fprintf(stderr, "%s is a shell builtin\n", current_command);
+  	}
+	find_program(current_command,1);
+  return 0;
+}
+
 
 int redirected_execution(struct command* full_command, int inp_fd, int out_fd) {
   int status = 1;
@@ -328,7 +356,7 @@ int redirected_execution(struct command* full_command, int inp_fd, int out_fd) {
         int status = cmd_table[fundex].fun(args);
         exit(status);
       } else {
-        char* program_path = find_program(args[0]);
+        char* program_path = find_program(args[0],0);
         if (program_path == NULL) exit(1);
         execv(program_path, args);
         exit(1);
@@ -354,7 +382,7 @@ int execute_command(char** args) {
   if (fundex >= 0) {
     status = cmd_table[fundex].fun(args);
   } else {
-    char* program_path = find_program(args[0]);
+    char* program_path = find_program(args[0],0);
     if (program_path == NULL) return status;
     pid_t pid = fork();
     if (pid < 0) {
