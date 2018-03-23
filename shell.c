@@ -210,7 +210,7 @@ int cmd_type(char** command) {
   		fprintf(stderr, "%s is a shell builtin\n", current_command);
   	}
 	find_program(current_command,1);
-  return 1;  // change this to 0 on success
+  return 0;
 }
 
 
