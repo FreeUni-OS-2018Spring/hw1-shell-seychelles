@@ -10,6 +10,8 @@
 #include <sys/wait.h>
 #include <termios.h>
 #include <unistd.h>
+
+#include <signal.h>
 #include <fcntl.h>
 #include "tokenizer.h"
 
@@ -28,6 +30,12 @@ struct termios shell_tmodes;
 
 /* Process group id for the shell */
 pid_t shell_pgid;
+
+/* Currently active process group in foreground */
+pid_t active_pgid = -1;
+
+/* Currently active process in foreground */
+pid_t active_pid = -1;
 
 int cmd_exit(char** command);
 int cmd_help(char** command);
@@ -232,6 +240,9 @@ int redirected_execution(struct command* full_command, int inp_fd, int out_fd) {
       }
 
     } else { /* Parent Process */
+      if (active_pgid == -1)
+        active_pgid = pid;
+      setpgid(pid, active_pgid);
       if (i < full_command->cmds_length - 1) close(write_pipe[1]);
       if (i > 0) close(read_pipe[0]);
       int* tmp = read_pipe;
@@ -240,7 +251,7 @@ int redirected_execution(struct command* full_command, int inp_fd, int out_fd) {
     }
   }
   for (size_t i = 0; i < full_command->cmds_length; i++) /* Wait for all childs */
-    wait(&status);
+    waitpid(-1, &status, WSTOPPED);
   return status;
 }
 
@@ -260,7 +271,11 @@ int execute_command(char** args) {
       execv(program_path, args);
       exit(1);
     } else { /* Parent Process */
-      wait(&status);
+      active_pid = pid;
+      setpgid(pid, pid);
+      tcsetpgrp(shell_terminal, pid);
+      waitpid(-1, &status, WSTOPPED);
+      tcsetpgrp(shell_terminal, shell_pgid);
     }
   }
   return status;
@@ -292,8 +307,31 @@ void init_shell() {
   }
 }
 
+void signal_handler(int signum) {
+  if (signum == SIGINT) {
+    if (active_pid != -1) {
+      active_pid = -1;
+      kill(active_pid, SIGINT);
+    } else if (active_pgid != -1) {
+      active_pgid = -1;
+      killpg(active_pgid, SIGINT);
+    }
+  } else if (signum == SIGTSTP) {
+    if (active_pid != -1) {
+      active_pid = -1;
+      kill(active_pid, SIGTSTP);
+    } else if (active_pgid != -1) {
+      active_pgid = -1;
+      killpg(active_pgid, SIGTSTP);
+    }
+  }
+}
+
 int main(unused int argc, unused char* argv[]) {
   init_shell();
+  signal(SIGTTOU, SIG_IGN);
+  signal(SIGINT, signal_handler);
+  signal(SIGTSTP, signal_handler);
 
   static char line[4096];
   int line_num = 0;
