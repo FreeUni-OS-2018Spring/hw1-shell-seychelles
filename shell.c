@@ -279,7 +279,7 @@ void set_limit(int resource, int value, char* info, bool is_soft, bool print) {
 
   setrlimit(resource, &limit);
 
-  return;
+  free(info);
 }
 
 void get_limit(int resource, int value, char* info, bool is_soft, bool print) {
@@ -291,6 +291,8 @@ void get_limit(int resource, int value, char* info, bool is_soft, bool print) {
     fprintf(stdout, "%d\n", (int)limit.rlim_cur);
   else
     fprintf(stdout, "%d\n", (int)limit.rlim_max);
+
+  free(info);
 }
 
 int cmd_ulimit(char** command) {
