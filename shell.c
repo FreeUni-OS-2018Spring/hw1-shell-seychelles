@@ -311,6 +311,7 @@ int lookup(char cmd[]) {
 
 /* Checks if program exists and if not searching in PATH */
 // >show_all_results< parameter says if method should print/log the paths
+// default parameter value of is_builtin is -1
 char* find_program(char* program_path, int show_all_results, int is_builtin) {
   if (access(program_path, 0) >= 0) {
     return program_path;
@@ -339,13 +340,12 @@ char* find_program(char* program_path, int show_all_results, int is_builtin) {
       strcpy(res + strlen(current_env), (const char*)&program_sufix_path);
       if (access((const char*)&res, 0) >= 0) {
         if (show_all_results != 0) {
-          fprintf(stderr, "%s is %s\n", program_path, res);
+          fprintf(stdout, "%s is %s\n", program_path, res);
         }
 
         if (final_res == NULL) {
           final_res = strdup((const char*)&res);
         }
-        // return strdup((const char*)&res);
       }
       start = i + 1;
     }
@@ -357,12 +357,11 @@ char* find_program(char* program_path, int show_all_results, int is_builtin) {
 
   if (access((const char*)&last_attempt, 0) >= 0) {
     if (show_all_results != 0) {
-      fprintf(stderr, "%s is %s\n", program_path, last_attempt);
+      fprintf(stdout, "%s is %s\n", program_path, last_attempt);
     }
     if (final_res == NULL) {
       final_res = strdup((const char*)&last_attempt);
     }
-    // return strdup((const char*)&last_attempt);
   }
   if (final_res != NULL) {
     return final_res;
@@ -379,7 +378,7 @@ int cmd_type(char** command) {
   char* current_command = command[1];
   int have_command = lookup(current_command);
   if (have_command != -1) {
-    fprintf(stderr, "%s is a shell builtin\n", current_command);
+    fprintf(stdout, "%s is a shell builtin\n", current_command);
   }
   find_program(current_command, 1, have_command);
   return 0;
