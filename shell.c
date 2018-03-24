@@ -1,3 +1,4 @@
+#define _GNU_SOURCE
 #include <ctype.h>
 #include <errno.h>
 #include <fcntl.h>
@@ -7,15 +8,13 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/resource.h>
+#include <sys/stat.h>
 #include <sys/time.h>
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <termios.h>
 #include <ulimit.h>
 #include <unistd.h>
-
-#include <fcntl.h>
-#include <signal.h>
 #include "tokenizer.h"
 
 /* Convenience macro to silence compiler warnings about unused function
@@ -141,7 +140,17 @@ int cmd_kill(char** command) {
   return 0;
 }
 
-void get_limit_resources(char* flaga, char* flagb, limits function) {
+int get_pipe_size() {
+  int file_descriptors[2];
+  pipe(file_descriptors);
+  int size = fcntl(file_descriptors[1], F_GETPIPE_SZ);
+  close(file_descriptors[1]);
+  close(file_descriptors[0]);
+
+  return size / 8 / 512;
+}
+
+void limit_helper(char* flaga, char* flagb, limits function) {
   bool is_soft;
   if (flaga[1] == 'H')
     is_soft = false;
@@ -170,8 +179,8 @@ void get_limit_resources(char* flaga, char* flagb, limits function) {
                strdup("max memory size         (kbytes, -m)"), is_soft, true);
       function(RLIMIT_NOFILE, value,
                strdup("open files                      (-n)"), is_soft, true);
-      function(RLIMIT_NOFILE, value,
-               strdup("pipe size            (512 bytes, -p)"), is_soft, true);
+      fprintf(stdout, "pipe size            (512 bytes, -p) %d\n",
+              get_pipe_size());
       function(RLIMIT_MSGQUEUE, value,
                strdup("POSIX message queues     (bytes, -q)"), is_soft, true);
       function(RLIMIT_RTPRIO, value,
@@ -195,67 +204,54 @@ void get_limit_resources(char* flaga, char* flagb, limits function) {
       function(RLIMIT_DATA, value,
                strdup("data seg size           (kbytes, -d)"), is_soft, false);
       break;
-
     case 'e':
       function(RLIMIT_NICE, value,
                strdup("scheduling priority             (-e)"), is_soft, false);
       break;
-
     case 'f':
       function(RLIMIT_FSIZE, value,
                strdup("file size               (blocks, -f)"), is_soft, false);
       break;
-
     case 'i':
       function(RLIMIT_SIGPENDING, value,
                strdup("pending signals                 (-i)"), is_soft, false);
       break;
-
     case 'l':
       function(RLIMIT_MEMLOCK, value,
                strdup("max locked memory       (kbytes, -l)"), is_soft, false);
       break;
-
     case 'm':
       function(RLIMIT_RSS, value,
                strdup("max memory size         (kbytes, -m)"), is_soft, false);
       break;
-
     case 'n':
       function(RLIMIT_NOFILE, value,
                strdup("open files                      (-n)"), is_soft, false);
       break;
-
-    case 'p':
-      function(RLIMIT_NOFILE, value,
-               strdup("pipe size            (512 bytes, -p)"), is_soft, false);
+    case 'p': {
+      fprintf(stdout, "%d\n", get_pipe_size());
       break;
-
+    }
     case 'q':
       function(RLIMIT_MSGQUEUE, value,
                strdup("POSIX message queues     (bytes, -q)"), is_soft, false);
       break;
-
     case 'r':
       function(RLIMIT_RTPRIO, value,
                strdup("real-time priority              (-r)"), is_soft, false);
       break;
-
     case 's':
       function(RLIMIT_STACK, value,
                strdup("stack size              (kbytes, -s)"), is_soft, false);
       break;
-
     case 't':
       function(RLIMIT_CPU, value,
                strdup("cpu time               (seconds, -t)"), is_soft, false);
       break;
-
     case 'u':
       function(RLIMIT_NPROC, value,
                strdup("max user processes              (-u)"), is_soft, false);
       break;
-
     case 'v':
       function(RLIMIT_AS, value, strdup("virtual memory          (kbytes, -v)"),
                is_soft, false);
@@ -297,9 +293,11 @@ void get_limit(int resource, int value, char* info, bool is_soft, bool print) {
 
 int cmd_ulimit(char** command) {
   if (get_length(command) < 2) {
-    get_limit_resources(command[1], NULL, get_limit);
+    limit_helper(command[1], NULL, get_limit);
+    return 0;
   } else {
-    get_limit_resources(command[1], command[2], set_limit);
+    limit_helper(command[1], command[2], set_limit);
+    return 0;
   }
   return 1;
 }
