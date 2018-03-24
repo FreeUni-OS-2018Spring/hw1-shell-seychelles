@@ -315,7 +315,23 @@ int cmd_type(char** command) {
 }
 
 int cmd_echo(char** command) {
-  return 0;
+	char* current_echo_command = command[1];
+	if(current_echo_command==NULL){
+		fprintf(stderr, "%s\n", "");
+		return 0;
+	}
+	if(current_echo_command[0]=='$'){
+		char* env_variable = getenv(&current_echo_command[1]);
+
+		if(env_variable==NULL){
+			fprintf(stderr, "%s\n", "");
+			return 0;
+		}
+		fprintf(stderr, "%s\n", env_variable);
+		return 0;
+	}
+	fprintf(stderr, "%s\n", command[1]);
+	return 0;
 }
 
 int redirected_execution(struct command* full_command, int inp_fd, int out_fd) {
