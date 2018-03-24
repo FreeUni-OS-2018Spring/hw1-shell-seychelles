@@ -1,3 +1,4 @@
+#define _GNU_SOURCE
 #include <ctype.h>
 #include <errno.h>
 #include <fcntl.h>
@@ -7,15 +8,13 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/resource.h>
+#include <sys/stat.h>
 #include <sys/time.h>
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <termios.h>
 #include <ulimit.h>
 #include <unistd.h>
-
-#include <signal.h>
-#include <fcntl.h>
 #include "tokenizer.h"
 
 /* Convenience macro to silence compiler warnings about unused function
@@ -55,6 +54,7 @@ int cmd_wait(char** command);
 
 /* Built-in command functions take token array (see parse.h) and return int */
 typedef int cmd_fun_t(char** command);
+typedef void (*limits)(int, int, char*, bool, bool);
 
 /* Built-in command struct and lookup table */
 typedef struct fun_desc {
@@ -154,93 +154,164 @@ int cmd_kill(char** command) {
   return 0;
 }
 
-int get_limit_resources(char* flag, bool* is_soft) {
-  if (flag[1] == 'H')
-    *is_soft = false;
-  else
-    *is_soft = true;
+int get_pipe_size() {
+  int file_descriptors[2];
+  pipe(file_descriptors);
+  int size = fcntl(file_descriptors[1], F_GETPIPE_SZ);
+  close(file_descriptors[1]);
+  close(file_descriptors[0]);
 
-  size_t length = strlen(flag);
-  char f = flag[length - 1];
+  return size / 8 / 512;
+}
+
+void limit_helper(char* flaga, char* flagb, limits function) {
+  bool is_soft;
+  if (flaga[1] == 'H')
+    is_soft = false;
+  else
+    is_soft = true;
+
+  char f = flaga[strlen(flaga) - 1];
+  int value = flagb && is_number(flagb) ? atoi(flagb) : 0;
   // fprintf(stdout, "%d %c\n", strlen(flag), f);
 
   switch (f) {
     case 'a':
-      fprintf(stdout,
-              "karoche dzmao ar mushaobs ra esa "
-              "jerisjerobita)))))))))))))))))))))))))))))))) kiorneli");
-      return RLIMIT_DATA;
+      function(RLIMIT_CORE, value,
+               strdup("core file size          (blocks, -c)"), is_soft, true);
+      function(RLIMIT_DATA, value,
+               strdup("data seg size           (kbytes, -d)"), is_soft, true);
+      function(RLIMIT_NICE, value,
+               strdup("scheduling priority             (-e)"), is_soft, true);
+      function(RLIMIT_FSIZE, value,
+               strdup("file size               (blocks, -f)"), is_soft, true);
+      function(RLIMIT_SIGPENDING, value,
+               strdup("pending signals                 (-i)"), is_soft, true);
+      function(RLIMIT_MEMLOCK, value,
+               strdup("max locked memory       (kbytes, -l)"), is_soft, true);
+      function(RLIMIT_RSS, value,
+               strdup("max memory size         (kbytes, -m)"), is_soft, true);
+      function(RLIMIT_NOFILE, value,
+               strdup("open files                      (-n)"), is_soft, true);
+      fprintf(stdout, "pipe size            (512 bytes, -p) %d\n",
+              get_pipe_size());
+      function(RLIMIT_MSGQUEUE, value,
+               strdup("POSIX message queues     (bytes, -q)"), is_soft, true);
+      function(RLIMIT_RTPRIO, value,
+               strdup("real-time priority              (-r)"), is_soft, true);
+      function(RLIMIT_STACK, value,
+               strdup("stack size              (kbytes, -s)"), is_soft, true);
+      function(RLIMIT_CPU, value,
+               strdup("cpu time               (seconds, -t)"), is_soft, true);
+      function(RLIMIT_NPROC, value,
+               strdup("max user processes              (-u)"), is_soft, true);
+      function(RLIMIT_AS, value, strdup("virtual memory          (kbytes, -v)"),
+               is_soft, true);
+      function(RLIMIT_LOCKS, value,
+               strdup("file locks                      (-x)"), is_soft, true);
+      break;
     case 'c':
-      return RLIMIT_CORE;
+      function(RLIMIT_CORE, value,
+               strdup("core file size          (blocks, -c)"), is_soft, false);
+      break;
     case 'd':
-      return RLIMIT_DATA;
+      function(RLIMIT_DATA, value,
+               strdup("data seg size           (kbytes, -d)"), is_soft, false);
+      break;
     case 'e':
-      return RLIMIT_NICE;
+      function(RLIMIT_NICE, value,
+               strdup("scheduling priority             (-e)"), is_soft, false);
+      break;
     case 'f':
-      return RLIMIT_FSIZE;
+      function(RLIMIT_FSIZE, value,
+               strdup("file size               (blocks, -f)"), is_soft, false);
+      break;
     case 'i':
-      return RLIMIT_SIGPENDING;
+      function(RLIMIT_SIGPENDING, value,
+               strdup("pending signals                 (-i)"), is_soft, false);
+      break;
     case 'l':
-      return RLIMIT_MEMLOCK;
+      function(RLIMIT_MEMLOCK, value,
+               strdup("max locked memory       (kbytes, -l)"), is_soft, false);
+      break;
     case 'm':
-      return RLIMIT_RSS;
+      function(RLIMIT_RSS, value,
+               strdup("max memory size         (kbytes, -m)"), is_soft, false);
+      break;
     case 'n':
-      return RLIMIT_NOFILE;
-    case 'p':
-      return RLIMIT_NOFILE;
+      function(RLIMIT_NOFILE, value,
+               strdup("open files                      (-n)"), is_soft, false);
+      break;
+    case 'p': {
+      fprintf(stdout, "%d\n", get_pipe_size());
+      break;
+    }
     case 'q':
-      return RLIMIT_MSGQUEUE;
+      function(RLIMIT_MSGQUEUE, value,
+               strdup("POSIX message queues     (bytes, -q)"), is_soft, false);
+      break;
     case 'r':
-      return RLIMIT_RTPRIO;
+      function(RLIMIT_RTPRIO, value,
+               strdup("real-time priority              (-r)"), is_soft, false);
+      break;
     case 's':
-      return RLIMIT_STACK;
+      function(RLIMIT_STACK, value,
+               strdup("stack size              (kbytes, -s)"), is_soft, false);
+      break;
     case 't':
-      return RLIMIT_CPU;
+      function(RLIMIT_CPU, value,
+               strdup("cpu time               (seconds, -t)"), is_soft, false);
+      break;
     case 'u':
-      return RLIMIT_NPROC;
+      function(RLIMIT_NPROC, value,
+               strdup("max user processes              (-u)"), is_soft, false);
+      break;
     case 'v':
-      return RLIMIT_AS;
-    case 'x':
-      return RLIMIT_LOCKS;
-  }
+      function(RLIMIT_AS, value, strdup("virtual memory          (kbytes, -v)"),
+               is_soft, false);
+      break;
 
-  return 0;
+    case 'x':
+      function(RLIMIT_LOCKS, value,
+               strdup("file locks                      (-x)"), is_soft, false);
+      break;
+  }
 }
 
-void set_limit(char* flaga, char* flagb) {
+void set_limit(int resource, int value, char* info, bool is_soft, bool print) {
   struct rlimit limit;
-  bool is_soft = true;
-  int resource = get_limit_resources(flaga, &is_soft);
   getrlimit(resource, &limit);
 
-  if (!is_number(flagb)) perror("invalid number");
-
   if (is_soft)
-    limit.rlim_cur = atoi(flagb);
+    limit.rlim_cur = value;
   else
-    limit.rlim_max = atoi(flagb);
+    limit.rlim_max = value;
 
   setrlimit(resource, &limit);
 
-  return;
+  free(info);
 }
 
-void get_limit(char* flag) {
+void get_limit(int resource, int value, char* info, bool is_soft, bool print) {
   struct rlimit limit;
-  bool is_soft = true;
-  getrlimit(get_limit_resources(flag, &is_soft), &limit);
+  getrlimit(resource, &limit);
 
+  if (print) fprintf(stdout, "%s ", info);
   if (is_soft)
     fprintf(stdout, "%d\n", (int)limit.rlim_cur);
   else
     fprintf(stdout, "%d\n", (int)limit.rlim_max);
+
+  free(info);
 }
 
 int cmd_ulimit(char** command) {
   if (get_length(command) < 2) {
-    get_limit(command[1]);
+    limit_helper(command[1], NULL, get_limit);
+    return 0;
   } else {
-    set_limit(command[1], command[2]);
+    limit_helper(command[1], command[2], set_limit);
+    return 0;
   }
   return 1;
 }
@@ -254,6 +325,7 @@ int lookup(char cmd[]) {
 
 /* Checks if program exists and if not searching in PATH */
 // >show_all_results< parameter says if method should print/log the paths
+// default parameter value of is_builtin is -1
 char* find_program(char* program_path, int show_all_results, int is_builtin) {
   if (access(program_path, 0) >= 0) {
     return program_path;
@@ -269,7 +341,7 @@ char* find_program(char* program_path, int show_all_results, int is_builtin) {
 
   int start = 0;
 
-  char* final_res=NULL;
+  char* final_res = NULL;
   for (int i = 0; i < strlen(env); i++) {
     if (env[i] == ':') {
       char current_env[i - start + 1];
@@ -281,14 +353,13 @@ char* find_program(char* program_path, int show_all_results, int is_builtin) {
       strcpy(res, (const char*)&current_env);
       strcpy(res + strlen(current_env), (const char*)&program_sufix_path);
       if (access((const char*)&res, 0) >= 0) {
-      	if(show_all_results!=0){
-      		fprintf(stderr, "%s is %s\n",program_path, res);
-      	}
+        if (show_all_results != 0) {
+          fprintf(stdout, "%s is %s\n", program_path, res);
+        }
 
-      	if(final_res==NULL){
-      		final_res=strdup((const char*)&res);
-      	}
-        //return strdup((const char*)&res);
+        if (final_res == NULL) {
+          final_res = strdup((const char*)&res);
+        }
       }
       start = i + 1;
     }
@@ -299,36 +370,51 @@ char* find_program(char* program_path, int show_all_results, int is_builtin) {
   strcpy(last_attempt + strlen(&env[start]), (const char*)&program_sufix_path);
 
   if (access((const char*)&last_attempt, 0) >= 0) {
-  	if(show_all_results!=0){
-  		fprintf(stderr, "%s is %s\n",program_path, last_attempt);
-  	}
-  	if(final_res == NULL){
-  		final_res=strdup((const char*)&last_attempt);
-  	}
-    //return strdup((const char*)&last_attempt);
+    if (show_all_results != 0) {
+      fprintf(stdout, "%s is %s\n", program_path, last_attempt);
+    }
+    if (final_res == NULL) {
+      final_res = strdup((const char*)&last_attempt);
+    }
   }
-  if(final_res != NULL){
-  	return final_res;
+  if (final_res != NULL) {
+    return final_res;
   }
 
   /* Here must be search in PATH */
-  if(is_builtin == -1){
-  	fprintf(stderr, "%s: command not found\n", program_path);
+  if (is_builtin == -1) {
+    fprintf(stderr, "%s: command not found\n", program_path);
   }
   return NULL;
 }
 
 int cmd_type(char** command) {
-  	char* current_command=command[1];
-  	int have_command =  lookup(current_command);
-  	if(have_command!=-1){
-  		fprintf(stderr, "%s is a shell builtin\n", current_command);
-  	}
-	find_program(current_command,1,have_command);
+  char* current_command = command[1];
+  int have_command = lookup(current_command);
+  if (have_command != -1) {
+    fprintf(stdout, "%s is a shell builtin\n", current_command);
+  }
+  find_program(current_command, 1, have_command);
   return 0;
 }
 
 int cmd_echo(char** command) {
+  char* current_echo_command = command[1];
+  if (current_echo_command == NULL) {
+    fprintf(stdout, "%s\n", "");
+    return 0;
+  }
+  if (current_echo_command[0] == '$') {
+    char* env_variable = getenv(&current_echo_command[1]);
+
+    if (env_variable == NULL) {
+      fprintf(stderr, "%s\n", "");
+      return 0;
+    }
+    fprintf(stdout, "%s\n", env_variable);
+    return 0;
+  }
+  fprintf(stdout, "%s\n", command[1]);
   return 0;
 }
 
@@ -342,7 +428,8 @@ int redirected_execution(struct command* full_command, int inp_fd, int out_fd) {
   for (size_t i = 0; i < full_command->cmds_length; i++) {
     char** args = command_get_cmd(full_command, i);
 
-    if (i < full_command->cmds_length - 1) /* Don't create pipe for last process */
+    if (i <
+        full_command->cmds_length - 1) /* Don't create pipe for last process */
       pipe(write_pipe);
 
     pid_t pid = fork();
@@ -350,7 +437,7 @@ int redirected_execution(struct command* full_command, int inp_fd, int out_fd) {
       fprintf(stderr, "Creating child process failed\n");
       return 1;
     } else if (pid == 0) { /* Child Process */
-      if (i == 0) { /* First process, only writes to pipe. */
+      if (i == 0) {        /* First process, only writes to pipe. */
         if (full_command->cmds_length != 1) { /* Check for pipeless case */
           close(write_pipe[0]);
           dup2(write_pipe[1], STDOUT_FILENO);
@@ -359,7 +446,8 @@ int redirected_execution(struct command* full_command, int inp_fd, int out_fd) {
           dup2(inp_fd, STDIN_FILENO);
         }
       }
-      if (i == full_command->cmds_length - 1) { /* Last process, only reads from pipe. */
+      if (i == full_command->cmds_length -
+                   1) { /* Last process, only reads from pipe. */
         if (full_command->cmds_length != 1) { /* Check for pipeless case */
           dup2(read_pipe[0], STDIN_FILENO);
         }
@@ -367,7 +455,10 @@ int redirected_execution(struct command* full_command, int inp_fd, int out_fd) {
           dup2(out_fd, STDOUT_FILENO);
         }
       }
-      if (i != 0 && i != full_command->cmds_length - 1) { /* Middle process, reads from pipe and writes to next pipe. */
+      if (i != 0 &&
+          i != full_command->cmds_length -
+                   1) { /* Middle process, reads from pipe and writes to next
+                           pipe. */
         close(write_pipe[0]);
         dup2(read_pipe[0], 0);
         dup2(write_pipe[1], 1);
@@ -378,7 +469,7 @@ int redirected_execution(struct command* full_command, int inp_fd, int out_fd) {
         int status = cmd_table[fundex].fun(args);
         exit(status);
       } else {
-        char* program_path = find_program(args[0],0,-1);
+        char* program_path = find_program(args[0], 0, -1);
         if (program_path == NULL) exit(1);
         execv(program_path, args);
         exit(1);
@@ -411,7 +502,7 @@ int execute_command(struct command* full_command) {
   if (fundex >= 0) {
     status = cmd_table[fundex].fun(args);
   } else {
-    char* program_path = find_program(args[0], 0 ,-1);
+    char* program_path = find_program(args[0], 0, -1);
     if (program_path == NULL) return status;
     pid_t pid = fork();
     if (pid < 0) {
@@ -526,7 +617,8 @@ int main(unused int argc, unused char* argv[]) {
             out_fd = fd;
             is_redirection = 1;
           } else {
-            fprintf(stderr, "%s: could not open file\n", full_command->out_file);
+            fprintf(stderr, "%s: could not open file\n",
+                    full_command->out_file);
             is_redirection = -1;
           }
         }
