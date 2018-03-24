@@ -40,6 +40,9 @@ pid_t active_pgid = -1;
 /* Currently active process in foreground */
 pid_t active_pid = -1;
 
+/* Count of processes in running state */
+pid_t running_process_count = 0;
+
 int cmd_exit(char** command);
 int cmd_help(char** command);
 int cmd_pwd(char** command);
@@ -48,6 +51,7 @@ int cmd_ulimit(char** command);
 int cmd_kill(char** command);
 int cmd_type(char** command);
 int cmd_echo(char** command);
+int cmd_wait(char** command);
 
 /* Built-in command functions take token array (see parse.h) and return int */
 typedef int cmd_fun_t(char** command);
@@ -67,7 +71,8 @@ fun_desc_t cmd_table[] = {
     {cmd_ulimit, "ulimit", "modify shell resource limits"},
     {cmd_kill, "kill", "send signal to a process"},
     {cmd_type, "type", "display information about command type"},
-    {cmd_echo, "echo", "prints input to standard output"}};
+    {cmd_echo, "echo", "prints input to standard output"},
+    {cmd_wait, "wait", "waits all children to terminate"}};
 
 /* Prints a helpful description for the given command */
 int cmd_help(unused char** command) {
@@ -96,6 +101,15 @@ int cmd_cd(char** command) {
     fprintf(stdout, "cd: %s: No such file or directory\n", path);
   }
   return 0;
+}
+
+/* Waits children to terminate */
+int cmd_wait(unused char** command) {
+  int status = 1;
+  for (int i = 0; i < running_process_count; i++) {
+    wait(&status);
+  }
+  return status;
 }
 
 size_t get_length(char** command) {
@@ -240,7 +254,7 @@ int lookup(char cmd[]) {
 
 /* Checks if program exists and if not searching in PATH */
 // >show_all_results< parameter says if method should print/log the paths
-char* find_program(char* program_path,int show_all_results, int is_builtin) {
+char* find_program(char* program_path, int show_all_results, int is_builtin) {
   if (access(program_path, 0) >= 0) {
     return program_path;
   }
@@ -288,17 +302,17 @@ char* find_program(char* program_path,int show_all_results, int is_builtin) {
   	if(show_all_results!=0){
   		fprintf(stderr, "%s is %s\n",program_path, last_attempt);
   	}
-  	if(final_res==NULL){
+  	if(final_res == NULL){
   		final_res=strdup((const char*)&last_attempt);
   	}
     //return strdup((const char*)&last_attempt);
   }
-  if(final_res!=NULL){
+  if(final_res != NULL){
   	return final_res;
   }
 
   /* Here must be search in PATH */
-  if(is_builtin==-1){
+  if(is_builtin == -1){
   	fprintf(stderr, "%s: command not found\n", program_path);
   }
   return NULL;
@@ -324,7 +338,7 @@ int redirected_execution(struct command* full_command, int inp_fd, int out_fd) {
   int fds2[2];
   int* read_pipe = fds1;  // Read from 0 write to 1.
   int* write_pipe = fds2;
-
+  pid_t pgid = -1;
   for (size_t i = 0; i < full_command->cmds_length; i++) {
     char** args = command_get_cmd(full_command, i);
 
@@ -371,9 +385,10 @@ int redirected_execution(struct command* full_command, int inp_fd, int out_fd) {
       }
 
     } else { /* Parent Process */
-      if (active_pgid == -1)
-        active_pgid = pid;
-      setpgid(pid, active_pgid);
+      running_process_count++;
+      if (pgid == -1)
+        pgid = pid;
+      setpgid(pid, pgid);
       if (i < full_command->cmds_length - 1) close(write_pipe[1]);
       if (i > 0) close(read_pipe[0]);
       int* tmp = read_pipe;
@@ -381,18 +396,22 @@ int redirected_execution(struct command* full_command, int inp_fd, int out_fd) {
       write_pipe = tmp;
     }
   }
-  for (size_t i = 0; i < full_command->cmds_length; i++) /* Wait for all childs */
-    waitpid(-1, &status, WSTOPPED);
+  active_pgid = pgid;
+  if (full_command->background == 0) {
+    for (size_t i = 0; i < full_command->cmds_length; i++) /* Wait for all childs in pipe */
+      waitpid(-1, &status, WSTOPPED);
+  }
   return status;
 }
 
-int execute_command(char** args) {
-  int status = 1;
+int execute_command(struct command* full_command) {
+  char** args = command_get_cmd(full_command, 0);
+  int status = 0;
   int fundex = lookup(args[0]); /* Find which built-in function to run. */
   if (fundex >= 0) {
     status = cmd_table[fundex].fun(args);
   } else {
-    char* program_path = find_program(args[0],0,-1);
+    char* program_path = find_program(args[0], 0 ,-1);
     if (program_path == NULL) return status;
     pid_t pid = fork();
     if (pid < 0) {
@@ -402,14 +421,34 @@ int execute_command(char** args) {
       execv(program_path, args);
       exit(1);
     } else { /* Parent Process */
-      active_pid = pid;
+      running_process_count++;
       setpgid(pid, pid);
-      tcsetpgrp(shell_terminal, pid);
-      waitpid(-1, &status, WSTOPPED);
-      tcsetpgrp(shell_terminal, shell_pgid);
+      if (full_command->background == 0) {
+        active_pid = pid;
+        tcsetpgrp(shell_terminal, pid);
+        waitpid(-1, &status, WSTOPPED);
+        tcsetpgrp(shell_terminal, shell_pgid);
+      }
     }
   }
   return status;
+}
+
+/* There's no handling for processes that were stopped */
+void signal_handler(int signum) {
+  if (signum == SIGINT || signum == SIGTSTP) {
+    if (active_pid != -1) {
+      kill(active_pid, signum);
+      active_pid = -1;
+    } else if (active_pgid != -1) {
+      killpg(active_pgid, signum);
+      active_pgid = -1;
+    }
+  } else if(signum == SIGCHLD) {
+    if (running_process_count > 0) 
+      /* Case when process was stopped and then termianted */
+      running_process_count--;
+  }
 }
 
 /* Intialization procedures for this shell */
@@ -436,24 +475,16 @@ void init_shell() {
 
     /* Save the current termios to a variable, so it can be restored later. */
     tcgetattr(shell_terminal, &shell_tmodes);
-  }
-}
 
-void signal_handler(int signum) {
-  if (active_pid != -1) {
-      active_pid = -1;
-      kill(active_pid, signum);
-    } else if (active_pgid != -1) {
-      active_pgid = -1;
-      killpg(active_pgid, signum);
-    }
+    signal(SIGTTOU, SIG_IGN);
+    signal(SIGINT, signal_handler);
+    signal(SIGTSTP, signal_handler);
+    signal(SIGCHLD, signal_handler);
+  }
 }
 
 int main(unused int argc, unused char* argv[]) {
   init_shell();
-  signal(SIGTTOU, SIG_IGN);
-  signal(SIGINT, signal_handler);
-  signal(SIGTSTP, signal_handler);
 
   static char line[4096];
   int line_num = 0;
@@ -506,7 +537,7 @@ int main(unused int argc, unused char* argv[]) {
           if (inp_fd != STDIN_FILENO) close(inp_fd);
           if (out_fd != STDOUT_FILENO) close(out_fd);
         } else if (is_redirection == 0) {
-          execute_command(command_get_cmd(full_command, 0));
+          execute_command(full_command);
         }
       } else {
         fprintf(stderr, "Syntax error!\n");

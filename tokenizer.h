@@ -7,6 +7,7 @@ struct command {
   char* inp_file;
   char* out_file;
   int append_to_file;
+  int background;
 };
 
 /* Parse line entered in terminal. */

@@ -33,6 +33,7 @@ struct command* parse(const char *line) {
   cmds->inp_file = NULL;
   cmds->out_file = NULL;
   cmds->append_to_file = 0;
+  cmds->background = 0;
 
   const int MODE_NORMAL = 0,
         MODE_SQUOTE = 1,
@@ -87,6 +88,9 @@ struct command* parse(const char *line) {
       } else if (c == '>') {
         // There must be some command before redirect operator.
         output_filename = 1;
+      } else if (c == '&') {
+        // This operator must be at the and of the line and separated with spaces.
+        cmds->background = 1;
       } else {
         token[n++] = c;
       }
