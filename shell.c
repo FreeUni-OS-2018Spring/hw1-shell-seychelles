@@ -387,7 +387,7 @@ int cmd_type(char** command) {
 int cmd_echo(char** command) {
   char* current_echo_command = command[1];
   if (current_echo_command == NULL) {
-    fprintf(stderr, "%s\n", "");
+    fprintf(stdout, "%s\n", "");
     return 0;
   }
   if (current_echo_command[0] == '$') {
@@ -397,10 +397,10 @@ int cmd_echo(char** command) {
       fprintf(stderr, "%s\n", "");
       return 0;
     }
-    fprintf(stderr, "%s\n", env_variable);
+    fprintf(stdout, "%s\n", env_variable);
     return 0;
   }
-  fprintf(stderr, "%s\n", command[1]);
+  fprintf(stdout, "%s\n", command[1]);
   return 0;
 }
 
