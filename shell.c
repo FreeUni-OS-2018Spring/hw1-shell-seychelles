@@ -58,7 +58,7 @@ int cmd_export(char** command);
 
 /* Built-in command functions take token array (see parse.h) and return int */
 typedef int cmd_fun_t(char** command);
-typedef void (*limits)(int, int, char*, bool, bool);
+typedef void (*limits)(int, int, char*, bool, bool, bool);
 
 /* Built-in command struct and lookup table */
 typedef struct fun_desc {
@@ -116,7 +116,7 @@ int cmd_pwd(unused char** command) {
 int cmd_cd(char** command) {
   char* path = command[1];  // need error checking.
   if (chdir(path) != 0) {
-    fprintf(stdout, "cd: %s: No such file or directory\n", path);
+    perror("cd: %s: No such file or directory\n");
   }
   return 0;
 }
@@ -161,8 +161,13 @@ int cmd_export(char** command) {
 }
 
 int is_number(char* str) {
+  int i = 0;
   int length = strlen(str);
-  for (int i = 0; i < length; i++)
+  if (str[0] == '-') {
+    i++;
+    length--;
+  }
+  for (; i < length; i++)
     if (!isdigit(str[i])) return 0;
   return 1;
 }
@@ -177,11 +182,11 @@ int cmd_kill(char** command) {
   if (is_number(command[1])) {
     pid = get_length(command) == 1 && is_number(command[1]) ? atoi(command[1])
                                                             : atoi(command[2]);
-
     // if single arugment is given default signal to SIGTERM.
     signal = get_length(command) == 2 && is_number(command[1])
                  ? atoi(command[1])
                  : SIGTERM;
+    if (signal < 0) signal = -signal;
   }
 
   if (kill(pid, signal) < 0) {
@@ -216,69 +221,91 @@ void limit_helper(char* flaga, char* flagb, limits function) {
   switch (f) {
     case 'a':
       function(RLIMIT_CORE, value,
-               strdup("core file size          (blocks, -c)"), is_soft, true);
+               strdup("core file size          (blocks, -c)"), is_soft, true,
+               false);
       function(RLIMIT_DATA, value,
-               strdup("data seg size           (kbytes, -d)"), is_soft, true);
+               strdup("data seg size           (kbytes, -d)"), is_soft, true,
+               true);
       function(RLIMIT_NICE, value,
-               strdup("scheduling priority             (-e)"), is_soft, true);
+               strdup("scheduling priority             (-e)"), is_soft, true,
+               false);
       function(RLIMIT_FSIZE, value,
-               strdup("file size               (blocks, -f)"), is_soft, true);
+               strdup("file size               (blocks, -f)"), is_soft, true,
+               false);
       function(RLIMIT_SIGPENDING, value,
-               strdup("pending signals                 (-i)"), is_soft, true);
+               strdup("pending signals                 (-i)"), is_soft, true,
+               false);
       function(RLIMIT_MEMLOCK, value,
-               strdup("max locked memory       (kbytes, -l)"), is_soft, true);
+               strdup("max locked memory       (kbytes, -l)"), is_soft, true,
+               true);
       function(RLIMIT_RSS, value,
-               strdup("max memory size         (kbytes, -m)"), is_soft, true);
+               strdup("max memory size         (kbytes, -m)"), is_soft, true,
+               true);
       function(RLIMIT_NOFILE, value,
-               strdup("open files                      (-n)"), is_soft, true);
+               strdup("open files                      (-n)"), is_soft, true,
+               false);
       fprintf(stdout, "pipe size            (512 bytes, -p) %d\n",
               get_pipe_size());
       function(RLIMIT_MSGQUEUE, value,
-               strdup("POSIX message queues     (bytes, -q)"), is_soft, true);
+               strdup("POSIX message queues     (bytes, -q)"), is_soft, true,
+               false);
       function(RLIMIT_RTPRIO, value,
-               strdup("real-time priority              (-r)"), is_soft, true);
+               strdup("real-time priority              (-r)"), is_soft, true,
+               false);
       function(RLIMIT_STACK, value,
-               strdup("stack size              (kbytes, -s)"), is_soft, true);
+               strdup("stack size              (kbytes, -s)"), is_soft, true,
+               true);
       function(RLIMIT_CPU, value,
-               strdup("cpu time               (seconds, -t)"), is_soft, true);
+               strdup("cpu time               (seconds, -t)"), is_soft, true,
+               false);
       function(RLIMIT_NPROC, value,
-               strdup("max user processes              (-u)"), is_soft, true);
+               strdup("max user processes              (-u)"), is_soft, true,
+               true);
       function(RLIMIT_AS, value, strdup("virtual memory          (kbytes, -v)"),
-               is_soft, true);
+               is_soft, true, true);
       function(RLIMIT_LOCKS, value,
-               strdup("file locks                      (-x)"), is_soft, true);
+               strdup("file locks                      (-x)"), is_soft, true,
+               false);
       break;
     case 'c':
       function(RLIMIT_CORE, value,
-               strdup("core file size          (blocks, -c)"), is_soft, false);
+               strdup("core file size          (blocks, -c)"), is_soft, false,
+               false);
       break;
     case 'd':
       function(RLIMIT_DATA, value,
-               strdup("data seg size           (kbytes, -d)"), is_soft, false);
+               strdup("data seg size           (kbytes, -d)"), is_soft, false,
+               true);
       break;
     case 'e':
       function(RLIMIT_NICE, value,
-               strdup("scheduling priority             (-e)"), is_soft, false);
+               strdup("scheduling priority             (-e)"), is_soft, false,
+               false);
       break;
     case 'f':
       function(RLIMIT_FSIZE, value,
-               strdup("file size               (blocks, -f)"), is_soft, false);
+               strdup("file size               (blocks, -f)"), is_soft, false,
+               false);
       break;
     case 'i':
       function(RLIMIT_SIGPENDING, value,
-               strdup("pending signals                 (-i)"), is_soft, false);
+               strdup("pending signals                 (-i)"), is_soft, false,
+               false);
       break;
     case 'l':
       function(RLIMIT_MEMLOCK, value,
-               strdup("max locked memory       (kbytes, -l)"), is_soft, false);
+               strdup("max locked memory       (kbytes, -l)"), is_soft, false,
+               true);
       break;
     case 'm':
       function(RLIMIT_RSS, value,
-               strdup("max memory size         (kbytes, -m)"), is_soft, false);
+               strdup("max memory size         (kbytes, -m)"), is_soft, false,
+               true);
       break;
     case 'n':
       function(RLIMIT_NOFILE, value,
-               strdup("open files                      (-n)"), is_soft, false);
+               strdup("open files                      (-n)"), is_soft, false,
+               false);
       break;
     case 'p': {
       fprintf(stdout, "%d\n", get_pipe_size());
@@ -286,37 +313,43 @@ void limit_helper(char* flaga, char* flagb, limits function) {
     }
     case 'q':
       function(RLIMIT_MSGQUEUE, value,
-               strdup("POSIX message queues     (bytes, -q)"), is_soft, false);
+               strdup("POSIX message queues     (bytes, -q)"), is_soft, false,
+               false);
       break;
     case 'r':
       function(RLIMIT_RTPRIO, value,
-               strdup("real-time priority              (-r)"), is_soft, false);
+               strdup("real-time priority              (-r)"), is_soft, false,
+               false);
       break;
     case 's':
       function(RLIMIT_STACK, value,
-               strdup("stack size              (kbytes, -s)"), is_soft, false);
+               strdup("stack size              (kbytes, -s)"), is_soft, false,
+               true);
       break;
     case 't':
       function(RLIMIT_CPU, value,
-               strdup("cpu time               (seconds, -t)"), is_soft, false);
+               strdup("cpu time               (seconds, -t)"), is_soft, false,
+               false);
       break;
     case 'u':
       function(RLIMIT_NPROC, value,
-               strdup("max user processes              (-u)"), is_soft, false);
+               strdup("max user processes              (-u)"), is_soft, false,
+               false);
       break;
     case 'v':
       function(RLIMIT_AS, value, strdup("virtual memory          (kbytes, -v)"),
-               is_soft, false);
+               is_soft, false, true);
       break;
-
     case 'x':
       function(RLIMIT_LOCKS, value,
-               strdup("file locks                      (-x)"), is_soft, false);
+               strdup("file locks                      (-x)"), is_soft, false,
+               false);
       break;
   }
 }
 
-void set_limit(int resource, int value, char* info, bool is_soft, bool print) {
+void set_limit(int resource, int value, char* info, bool is_soft, bool print,
+               bool kilobytes) {
   struct rlimit limit;
   getrlimit(resource, &limit);
 
@@ -330,15 +363,31 @@ void set_limit(int resource, int value, char* info, bool is_soft, bool print) {
   free(info);
 }
 
-void get_limit(int resource, int value, char* info, bool is_soft, bool print) {
+void get_limit(int resource, int value, char* info, bool is_soft, bool print,
+               bool kilobytes) {
   struct rlimit limit;
   getrlimit(resource, &limit);
 
+  unsigned long soft_limit = (unsigned long)limit.rlim_cur;
+  unsigned long hard_limit = (unsigned long)limit.rlim_max;
+
   if (print) fprintf(stdout, "%s ", info);
+  if ((is_soft && soft_limit == RLIM_INFINITY) ||
+      (!is_soft && hard_limit == RLIM_INFINITY)) {
+    fprintf(stdout, "unlimited\n");
+    free(info);
+    return;
+  }
+
+  if (kilobytes) {
+    soft_limit /= 1024;
+    hard_limit /= 1024;
+  }
+
   if (is_soft)
-    fprintf(stdout, "%d\n", (int)limit.rlim_cur);
+    fprintf(stdout, "%lu\n", soft_limit);
   else
-    fprintf(stdout, "%d\n", (int)limit.rlim_max);
+    fprintf(stdout, "%lu\n", hard_limit);
 
   free(info);
 }
@@ -495,8 +544,7 @@ int redirected_execution(struct command* full_command, int inp_fd, int out_fd) {
 
     } else { /* Parent Process */
       running_process_count++;
-      if (pgid == -1)
-        pgid = pid;
+      if (pgid == -1) pgid = pid;
       setpgid(pid, pgid);
       if (i < full_command->cmds_length - 1) close(write_pipe[1]);
       if (i > 0) close(read_pipe[0]);
@@ -507,7 +555,8 @@ int redirected_execution(struct command* full_command, int inp_fd, int out_fd) {
   }
   active_pgid = pgid;
   if (full_command->background == 0) {
-    for (size_t i = 0; i < full_command->cmds_length; i++) /* Wait for all childs in pipe */
+    for (size_t i = 0; i < full_command->cmds_length;
+         i++) /* Wait for all childs in pipe */
       waitpid(-1, &status, WSTOPPED);
   }
   return status;
@@ -557,8 +606,8 @@ void signal_handler(int signum) {
       killpg(active_pgid, signum);
       active_pgid = -1;
     }
-  } else if(signum == SIGCHLD) {
-    if (running_process_count > 0) 
+  } else if (signum == SIGCHLD) {
+    if (running_process_count > 0)
       /* Case when process was stopped and then termianted */
       running_process_count--;
   }
