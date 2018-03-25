@@ -42,6 +42,9 @@ pid_t active_pid = -1;
 /* Count of processes in running state */
 pid_t running_process_count = 0;
 
+/* Env Variables Map */
+simple_map variables;
+
 int cmd_exit(char** command);
 int cmd_help(char** command);
 int cmd_pwd(char** command);
@@ -51,6 +54,7 @@ int cmd_kill(char** command);
 int cmd_type(char** command);
 int cmd_echo(char** command);
 int cmd_wait(char** command);
+int cmd_export(char** command);
 
 /* Built-in command functions take token array (see parse.h) and return int */
 typedef int cmd_fun_t(char** command);
@@ -72,7 +76,8 @@ fun_desc_t cmd_table[] = {
     {cmd_kill, "kill", "send signal to a process"},
     {cmd_type, "type", "display information about command type"},
     {cmd_echo, "echo", "prints input to standard output"},
-    {cmd_wait, "wait", "waits all children to terminate"}};
+    {cmd_wait, "wait", "waits all children to terminate"},
+    {cmd_export, "export", "exports variable to environment"}};
 
 /* Prints a helpful description for the given command */
 int cmd_help(unused char** command) {
@@ -82,7 +87,20 @@ int cmd_help(unused char** command) {
 }
 
 /* Exits this shell */
-int cmd_exit(unused char** command) { exit(0); }
+int cmd_exit(unused char** command) {
+  simple_map_dispose(&variables);
+  exit(0);
+}
+
+size_t get_length(char** command) {
+  size_t length = 0;
+  for (int i = 1;; i++) {
+    char* arg = command[i];
+    if (arg == NULL) break;
+    length++;
+  }
+  return length;
+}
 
 /* Prints working directory */
 int cmd_pwd(unused char** command) {
@@ -112,14 +130,34 @@ int cmd_wait(unused char** command) {
   return status;
 }
 
-size_t get_length(char** command) {
-  size_t length = 0;
-  for (int i = 1;; i++) {
-    char* arg = command[i];
-    if (arg == NULL) break;
-    length++;
+int cmd_echo(char** command) {
+  if (command[1] == NULL) {
+    fprintf(stdout, "\n");
+    return 0;
   }
-  return length;
+  size_t command_length = get_length(command);
+  for (int i = 1; i < command_length; i++) {
+    fprintf(stdout, "%s ", command[i]);
+  }
+  fprintf(stdout, "%s\n", command[command_length]);
+  return 0;
+}
+
+int cmd_export(char** command) {
+  size_t arg_length = get_length(command);
+  if (arg_length == 1) { // Only export
+    char* value = simple_map_get(&variables, command[1]);
+    if (value == NULL) fprintf(stderr, "export: %s: No such variable\n", command[1]);
+    else setenv(command[1], value, 0);
+  } else if (arg_length == 2) { // Definition and export
+    char* name = strdup(command[1]);
+    char* value = strdup(command[2]);
+    simple_map_put(&variables, name, value);
+    setenv(name, value, 0);
+  } else {
+    // Error
+  }
+  return 0;
 }
 
 int is_number(char* str) {
@@ -398,26 +436,6 @@ int cmd_type(char** command) {
   return 0;
 }
 
-int cmd_echo(char** command) {
-  char* current_echo_command = command[1];
-  if (current_echo_command == NULL) {
-    fprintf(stdout, "%s\n", "");
-    return 0;
-  }
-  if (current_echo_command[0] == '$') {
-    char* env_variable = getenv(&current_echo_command[1]);
-
-    if (env_variable == NULL) {
-      fprintf(stderr, "%s\n", "");
-      return 0;
-    }
-    fprintf(stdout, "%s\n", env_variable);
-    return 0;
-  }
-  fprintf(stdout, "%s\n", command[1]);
-  return 0;
-}
-
 int redirected_execution(struct command* full_command, int inp_fd, int out_fd) {
   int status = 1;
   int fds1[2];
@@ -501,6 +519,10 @@ int execute_command(struct command* full_command) {
   int fundex = lookup(args[0]); /* Find which built-in function to run. */
   if (fundex >= 0) {
     status = cmd_table[fundex].fun(args);
+  } else if (full_command->env_var_definition == 1) { /* Definition without export */
+    char* name = strdup(args[0]);
+    char* value = strdup(args[1]);
+    simple_map_put(&variables, name, value);
   } else {
     char* program_path = find_program(args[0], 0, -1);
     if (program_path == NULL) return status;
@@ -577,6 +599,8 @@ void init_shell() {
 int main(unused int argc, unused char* argv[]) {
   init_shell();
 
+  simple_map_new(&variables);
+
   static char line[4096];
   int line_num = 0;
 
@@ -585,7 +609,7 @@ int main(unused int argc, unused char* argv[]) {
 
   while (fgets(line, 4096, stdin)) {
     /* Split our line into commands with it's arguments. */
-    struct command* full_command = parse(line);
+    struct command* full_command = parse(line, &variables);
 
     int inp_fd = STDIN_FILENO;
     int out_fd = STDOUT_FILENO;

@@ -1,4 +1,4 @@
-SRCS=shell.c tokenizer.c
+SRCS=shell.c tokenizer.c simple_map.c vector.c
 EXECUTABLES=shell
 
 CC=gcc

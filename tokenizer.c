@@ -2,6 +2,9 @@
 #include <stdlib.h>
 #include <string.h>
 #include "tokenizer.h"
+#include "simple_map.h"
+
+#include <stdio.h>
 
 static void *vector_push(void* pointer, size_t* size, void* elem) {
   void*** ptr = (void***)pointer;
@@ -18,7 +21,7 @@ static void *copy_word(char *source, size_t n) {
   return word;
 }
 
-struct command* parse(const char *line) {
+struct command* parse(const char *line, simple_map* variables) {
   if (line == NULL) {
     return NULL;
   }
@@ -34,6 +37,7 @@ struct command* parse(const char *line) {
   cmds->out_file = NULL;
   cmds->append_to_file = 0;
   cmds->background = 0;
+  cmds->env_var_definition = 0;
 
   const int MODE_NORMAL = 0,
         MODE_SQUOTE = 1,
@@ -44,9 +48,11 @@ struct command* parse(const char *line) {
   size_t cmd_len = 0;
   int input_filename = 0;
   int output_filename = 0;
+  int env_var = 0;
 
   for (unsigned int i = 0; i < line_length; i++) {
     char c = line[i];
+    
     if (mode == MODE_NORMAL) {
       if (c == '\'') {
         mode = MODE_SQUOTE;
@@ -64,6 +70,24 @@ struct command* parse(const char *line) {
           } else if (output_filename == 1) {
             output_filename = 0;
             cmds->out_file = (char*)copy_word(token, n);
+          } else if (env_var == 1) {
+            /* variable expansion */
+            env_var = 0;
+            char* var_name = (char*)copy_word(token, n);
+            char* var_value = simple_map_get(variables, var_name);
+            if (var_value == NULL) var_value = getenv(var_name);
+            if (var_value == NULL) {
+              free(var_name);
+              return NULL;
+            }
+            size_t value_length = strlen(var_value);
+            char tmp[1024];
+            strcpy(tmp, line + i); // Save string after variable.
+            strcpy((char*)line + i - strlen(var_name) - 1, var_value);
+            strcpy((char*)line + i - strlen(var_name) - 1 + value_length, tmp);
+            i -= strlen(var_name) + 1 + 1; // Rerun changed positions
+            line_length = strlen(line);
+            free(var_name);
           } else {
             void *word = copy_word(token, n);
             vector_push(&cmd, &cmd_len, word);
@@ -71,26 +95,33 @@ struct command* parse(const char *line) {
           n = 0;
         }
       } else if (c == '|') { // Pipe support.
-        // There must be some command before pipe operator.
+        /* There must be some command before and after pipe operator */
         vector_push(&cmd, &cmd_len, NULL); // Append NULL terminator.
         vector_push(&cmds->cmds, &cmds->cmds_length, cmd);
         cmd = NULL;
         cmd_len = 0;
         n = 0;
       } else if (c == '<') {
-        // There must be some command before redirect operator.
+        /* There must be some command before redirect operator */
         input_filename = 1;
       } else if (c == '>' && line[i + 1] == '>') {
-        // There must be some command before redirect operator.
+        /* There must be some command before and after redirect operator */
         output_filename = 1;
         cmds->append_to_file = 1;
         i++;
       } else if (c == '>') {
-        // There must be some command before redirect operator.
+        /* There must be some command before redirect operator */
         output_filename = 1;
       } else if (c == '&') {
-        // This operator must be at the and of the line and separated with spaces.
+        /* This operator must be at the and of the line and separated with spaces */
         cmds->background = 1;
+      } else if (c == '$') {
+        env_var = 1;
+      } else if (c == '=') {
+        cmds->env_var_definition = 1;
+        void* variable_name = copy_word(token, n);
+        vector_push(&cmd, &cmd_len, variable_name);
+        n = 0;
       } else {
         token[n++] = c;
       }
