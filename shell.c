@@ -123,8 +123,13 @@ size_t get_length(char** command) {
 }
 
 int is_number(char* str) {
+  int i = 0;
   int length = strlen(str);
-  for (int i = 0; i < length; i++)
+  if (str[0] == '-') {
+    i++;
+    length--;
+  }
+  for (; i < length; i++)
     if (!isdigit(str[i])) return 0;
   return 1;
 }
@@ -139,11 +144,11 @@ int cmd_kill(char** command) {
   if (is_number(command[1])) {
     pid = get_length(command) == 1 && is_number(command[1]) ? atoi(command[1])
                                                             : atoi(command[2]);
-
     // if single arugment is given default signal to SIGTERM.
     signal = get_length(command) == 2 && is_number(command[1])
                  ? atoi(command[1])
                  : SIGTERM;
+    if (signal < 0) signal = -signal;
   }
 
   if (kill(pid, signal) < 0) {
