@@ -50,6 +50,7 @@ int cmd_help(char** command);
 int cmd_pwd(char** command);
 int cmd_cd(char** command);
 int cmd_ulimit(char** command);
+int cmd_nice(char** command);
 int cmd_kill(char** command);
 int cmd_type(char** command);
 int cmd_echo(char** command);
@@ -73,6 +74,7 @@ fun_desc_t cmd_table[] = {
     {cmd_pwd, "pwd", "print working directory"},
     {cmd_cd, "cd", "change directory"},
     {cmd_ulimit, "ulimit", "modify shell resource limits"},
+    {cmd_nice, "nice", "run a command with a modified scheduling priority"},
     {cmd_kill, "kill", "send signal to a process"},
     {cmd_type, "type", "display information about command type"},
     {cmd_echo, "echo", "prints input to standard output"},
@@ -571,7 +573,8 @@ int redirected_execution(struct command* full_command, int inp_fd, int out_fd) {
   return status;
 }
 
-int execute_command(char** args, int background, int env_var_definition) {
+int execute_command(char** args, int background, int env_var_definition,
+                    int niceness) {
   int status = 0;
   int fundex = lookup(args[0]); /* Find which built-in function to run. */
   if (fundex >= 0) {
@@ -588,6 +591,14 @@ int execute_command(char** args, int background, int env_var_definition) {
       fprintf(stderr, "Creating child process failed\n");
       return 1;
     } else if (pid == 0) { /* Child Process */
+      errno = 0;
+      setpriority(PRIO_PROCESS, getpid(), niceness);
+      if (errno != 0) {
+        fprintf(stderr,
+                "Setting priority failed,\nyou may not have permission to "
+                "lower a process priority\n");
+        exit(1);
+      }
       execv(program_path, args);
       exit(1);
     } else { /* Parent Process */
@@ -604,6 +615,36 @@ int execute_command(char** args, int background, int env_var_definition) {
     }
   }
   return status;
+}
+
+int cmd_nice(char** command) {
+  errno = 0;
+  if (get_length(command) == 0) {
+    int prior = getpriority(PRIO_PROCESS, getpid());
+    if (errno != 0) {
+      return -100;
+    } else {
+      fprintf(stdout, "%d\n", prior);
+      return 0;
+    }
+  } else {
+    if (!strcmp(command[1], "-n")) {
+      if (get_length(command) > 2 && is_number(command[2])) {
+        int niceness = atoi(command[2]);
+        if (niceness >= -20 && niceness <= 19) {
+          return niceness;
+        } else {
+          fprintf(stdout, "%s\n", "niceness must be between -20 and 19");
+          return -100;
+        }
+      } else {
+        fprintf(stdout, "%s\n", "syntax error in passing arguments");
+        return -100;
+      }
+    } else {
+      return -21;
+    }
+  }
 }
 
 /* There's no handling for processes that were stopped */
@@ -755,15 +796,36 @@ int main(int argc, char* argv[]) {
           }
         }
 
+        char** args = command_get_cmd(full_command, 0);
+        int niceness = 0;
+        if (!strcmp(args[0], "nice")) {
+          niceness = cmd_nice(args);
+          if (niceness == 0 || niceness < -21) {
+            if (shell_is_interactive)
+              /* Please only print shell prompts when standard input is not a
+               * tty */
+              fprintf(stdout, "%d: ", ++line_num);
+            continue;
+          } else if (niceness == -21) {
+            niceness = 10;
+            args = args + 1;
+          } else {
+            args = args + 3;
+          }
+          // fprintf(stdout, "%d\n", niceness);
+          // for (int i = 0; i < get_length(args) + 1; i++) {
+          //   fprintf(stdout, "%s\n", args[i]);
+          // }
+        }
+
         if (full_command->cmds_length > 1 ||
             is_redirection == 1) {  // Pipes and redirection.
           redirected_execution(full_command, inp_fd, out_fd);
           if (inp_fd != STDIN_FILENO) close(inp_fd);
           if (out_fd != STDOUT_FILENO) close(out_fd);
         } else if (is_redirection == 0) {
-          char** args = command_get_cmd(full_command, 0);
           execute_command(args, full_command->background,
-                          full_command->env_var_definition);
+                          full_command->env_var_definition, niceness);
         }
       } else {
         fprintf(stderr, "Syntax error!\n");
