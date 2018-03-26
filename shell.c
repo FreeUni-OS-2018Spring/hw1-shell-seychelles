@@ -697,7 +697,7 @@ void c_command(int argc, char* argv[]) {
     char** splitted = str_split(argv[2], ';');
     int length = get_length(splitted) + 1;
     for (int i = 0; i < length; i++) {
-      printf("%s ", splitted[i]);
+      execute_command(str_split(splitted[i], ' '), 0, 0);
     }
   }
 }
