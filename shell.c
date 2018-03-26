@@ -738,8 +738,16 @@ void c_command(int argc, char* argv[]) {
     char** splitted = str_split(argv[2], ';');
     int length = get_length(splitted) + 1;
     for (int i = 0; i < length; i++) {
-      printf("%s ", splitted[i]);
+      char buffer[4096];
+      strcpy(buffer, splitted[i]);
+      int str_len = strlen(buffer);
+      buffer[str_len] = '\n';
+      buffer[str_len + 1] = '\0';
+      struct command* executable = parse(buffer, &variables);
+      execute_command(command_get_cmd(executable, 0), executable->background,
+                      executable->env_var_definition);
     }
+    exit(0);
   }
 }
 
