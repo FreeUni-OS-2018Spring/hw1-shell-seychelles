@@ -40,7 +40,7 @@ pid_t active_pgid = -1;
 pid_t active_pid = -1;
 
 /* Count of processes in running state */
-pid_t running_process_count = 0;
+pid_t background_process_count = 0;
 
 /* Env Variables Map */
 simple_map variables;
@@ -87,9 +87,13 @@ int cmd_help(unused char** command) {
 }
 
 /* Exits this shell */
-int cmd_exit(unused char** command) {
+int cmd_exit(char** command) {
+  int status = 0;
+  if (command[1] != NULL) {
+    status = atoi(command[1]);
+  }
   simple_map_dispose(&variables);
-  exit(0);
+  exit(status);
 }
 
 size_t get_length(char** command) {
@@ -124,9 +128,10 @@ int cmd_cd(char** command) {
 /* Waits children to terminate */
 int cmd_wait(unused char** command) {
   int status = 1;
-  for (int i = 0; i < running_process_count; i++) {
+  for (int i = 0; i < background_process_count; i++) {
     wait(&status);
   }
+  background_process_count = 0;
   return status;
 }
 
@@ -495,8 +500,7 @@ int redirected_execution(struct command* full_command, int inp_fd, int out_fd) {
   for (size_t i = 0; i < full_command->cmds_length; i++) {
     char** args = command_get_cmd(full_command, i);
 
-    if (i <
-        full_command->cmds_length - 1) /* Don't create pipe for last process */
+    if (i < full_command->cmds_length - 1) /* Don't create pipe for last process */
       pipe(write_pipe);
 
     pid_t pid = fork();
@@ -513,8 +517,7 @@ int redirected_execution(struct command* full_command, int inp_fd, int out_fd) {
           dup2(inp_fd, STDIN_FILENO);
         }
       }
-      if (i == full_command->cmds_length -
-                   1) { /* Last process, only reads from pipe. */
+      if (i == full_command->cmds_length - 1) { /* Last process, only reads from pipe. */
         if (full_command->cmds_length != 1) { /* Check for pipeless case */
           dup2(read_pipe[0], STDIN_FILENO);
         }
@@ -522,10 +525,7 @@ int redirected_execution(struct command* full_command, int inp_fd, int out_fd) {
           dup2(out_fd, STDOUT_FILENO);
         }
       }
-      if (i != 0 &&
-          i != full_command->cmds_length -
-                   1) { /* Middle process, reads from pipe and writes to next
-                           pipe. */
+      if (i != 0 && i != full_command->cmds_length - 1) { /* Middle process, reads from pipe and writes to next pipe. */
         close(write_pipe[0]);
         dup2(read_pipe[0], 0);
         dup2(write_pipe[1], 1);
@@ -543,7 +543,6 @@ int redirected_execution(struct command* full_command, int inp_fd, int out_fd) {
       }
 
     } else { /* Parent Process */
-      running_process_count++;
       if (pgid == -1) pgid = pid;
       setpgid(pid, pgid);
       if (i < full_command->cmds_length - 1) close(write_pipe[1]);
@@ -553,22 +552,23 @@ int redirected_execution(struct command* full_command, int inp_fd, int out_fd) {
       write_pipe = tmp;
     }
   }
-  active_pgid = pgid;
   if (full_command->background == 0) {
-    for (size_t i = 0; i < full_command->cmds_length;
-         i++) /* Wait for all childs in pipe */
-      waitpid(-1, &status, WSTOPPED);
+    active_pgid = pgid;
+    for (size_t i = 0; i < full_command->cmds_length; i++) /* Wait for all childs in pipe */
+      waitpid(-pgid, &status, WSTOPPED);
+    active_pgid = -1;
+  } else {
+    background_process_count += full_command->cmds_length;
   }
   return status;
 }
 
-int execute_command(struct command* full_command) {
-  char** args = command_get_cmd(full_command, 0);
+int execute_command(char** args, int background, int env_var_definition) {
   int status = 0;
   int fundex = lookup(args[0]); /* Find which built-in function to run. */
   if (fundex >= 0) {
     status = cmd_table[fundex].fun(args);
-  } else if (full_command->env_var_definition == 1) { /* Definition without export */
+  } else if (env_var_definition == 1) { /* Definition without export */
     char* name = strdup(args[0]);
     char* value = strdup(args[1]);
     simple_map_put(&variables, name, value);
@@ -583,13 +583,15 @@ int execute_command(struct command* full_command) {
       execv(program_path, args);
       exit(1);
     } else { /* Parent Process */
-      running_process_count++;
       setpgid(pid, pid);
-      if (full_command->background == 0) {
+      if (background == 0) {
         active_pid = pid;
         tcsetpgrp(shell_terminal, pid);
-        waitpid(-1, &status, WSTOPPED);
+        waitpid(pid, &status, WSTOPPED);
         tcsetpgrp(shell_terminal, shell_pgid);
+        active_pid = -1;
+      } else {
+        background_process_count++;
       }
     }
   }
@@ -601,15 +603,11 @@ void signal_handler(int signum) {
   if (signum == SIGINT || signum == SIGTSTP) {
     if (active_pid != -1) {
       kill(active_pid, signum);
-      active_pid = -1;
     } else if (active_pgid != -1) {
       killpg(active_pgid, signum);
-      active_pgid = -1;
     }
   } else if (signum == SIGCHLD) {
-    if (running_process_count > 0)
-      /* Case when process was stopped and then termianted */
-      running_process_count--;
+    waitpid(-1, NULL, WSTOPPED);
   }
 }
 
@@ -649,6 +647,7 @@ int main(unused int argc, unused char* argv[]) {
   init_shell();
 
   simple_map_new(&variables);
+  simple_map_put(&variables, strdup("?"), strdup("0"));
 
   static char line[4096];
   int line_num = 0;
@@ -673,8 +672,7 @@ int main(unused int argc, unused char* argv[]) {
             inp_fd = fd;
             is_redirection = 1;
           } else {
-            fprintf(stderr, "%s: could not open file\n",
-                    full_command->inp_file);
+            fprintf(stderr, "%s: could not open file\n", full_command->inp_file);
             is_redirection = -1;
           }
         }
@@ -690,8 +688,7 @@ int main(unused int argc, unused char* argv[]) {
             out_fd = fd;
             is_redirection = 1;
           } else {
-            fprintf(stderr, "%s: could not open file\n",
-                    full_command->out_file);
+            fprintf(stderr, "%s: could not open file\n", full_command->out_file);
             is_redirection = -1;
           }
         }
@@ -702,7 +699,8 @@ int main(unused int argc, unused char* argv[]) {
           if (inp_fd != STDIN_FILENO) close(inp_fd);
           if (out_fd != STDOUT_FILENO) close(out_fd);
         } else if (is_redirection == 0) {
-          execute_command(full_command);
+          char** args = command_get_cmd(full_command, 0);
+          execute_command(args, full_command->background, full_command->env_var_definition);
         }
       } else {
         fprintf(stderr, "Syntax error!\n");
