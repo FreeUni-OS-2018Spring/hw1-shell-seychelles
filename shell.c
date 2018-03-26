@@ -494,6 +494,55 @@ int cmd_type(char** command) {
   return 0;
 }
 
+
+int logical_operation(){
+	char* full_command="ls && echo 'success' && echo 'fail'";
+	int size=strlen(full_command);
+	int start=0;
+	bool last_logial_operator=false; // && TRUE || FALSE
+
+	for(int i=0;i<size-1;i++){
+		if((full_command[i]=='|' && full_command[i+1]=='|') || 
+			(full_command[i]=='&' && full_command[i+1]=='&')){
+
+			if(full_command[i]=='&'){
+				last_logial_operator=true;
+			}else{
+				last_logial_operator=false;
+			}
+			
+			char new_command[i-start];
+			new_command[i-start-1]='\0';
+			strncpy(new_command,&full_command[start],i-start-1);
+  			struct command* current_full_command = parse(new_command, &variables);
+  			int execute_code = execute_command(current_full_command);
+  			command_destroy(current_full_command); //free
+
+  			if(execute_code==0){ // execute command OK
+  				if(last_logial_operator==false){// &&
+  					return 0;
+  				} 
+  			}else{ // execute command ERROR
+  				if(last_logial_operator==true){// &&
+  					return 0;
+  				}
+  			}
+			start=i+3;
+		}
+	}
+
+	int last_size=strlen(full_command)-start+1;
+	char last_command [last_size];
+	last_command[last_size-1]='\0';
+	strncpy(last_command,&full_command[start], last_size-1);
+
+	struct command* current_full_command = parse(last_command, &variables);
+  	int current_command_execute_code=    execute_command(current_full_command);
+  	command_destroy(current_full_command); //free
+
+	return current_command_execute_code;
+}
+
 int redirected_execution(struct command* full_command, int inp_fd, int out_fd) {
   int status = 1;
   int fds1[2];
