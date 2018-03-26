@@ -145,11 +145,13 @@ int cmd_echo(char** command) {
 
 int cmd_export(char** command) {
   size_t arg_length = get_length(command);
-  if (arg_length == 1) { // Only export
+  if (arg_length == 1) {  // Only export
     char* value = simple_map_get(&variables, command[1]);
-    if (value == NULL) fprintf(stderr, "export: %s: No such variable\n", command[1]);
-    else setenv(command[1], value, 0);
-  } else if (arg_length == 2) { // Definition and export
+    if (value == NULL)
+      fprintf(stderr, "export: %s: No such variable\n", command[1]);
+    else
+      setenv(command[1], value, 0);
+  } else if (arg_length == 2) {  // Definition and export
     char* name = strdup(command[1]);
     char* value = strdup(command[2]);
     simple_map_put(&variables, name, value);
@@ -568,7 +570,8 @@ int execute_command(struct command* full_command) {
   int fundex = lookup(args[0]); /* Find which built-in function to run. */
   if (fundex >= 0) {
     status = cmd_table[fundex].fun(args);
-  } else if (full_command->env_var_definition == 1) { /* Definition without export */
+  } else if (full_command->env_var_definition ==
+             1) { /* Definition without export */
     char* name = strdup(args[0]);
     char* value = strdup(args[1]);
     simple_map_put(&variables, name, value);
@@ -645,7 +648,58 @@ void init_shell() {
   }
 }
 
-int main(unused int argc, unused char* argv[]) {
+char** str_split(char* str, const char delimiter) {
+  char** result = 0;
+  size_t count = 0;
+  char* tmp = str;
+  char* last_comma = 0;
+  char delim[2];
+  delim[0] = delimiter;
+  delim[1] = 0;
+
+  /* Count how many elements will be extracted. */
+  while (*tmp) {
+    if (delimiter == *tmp) {
+      count++;
+      last_comma = tmp;
+    }
+    tmp++;
+  }
+
+  /* Add space for trailing token. */
+  count += last_comma < (str + strlen(str) - 1);
+
+  /* Add space for terminating null string so caller
+     knows where the list of returned strings ends. */
+  count++;
+
+  result = malloc(sizeof(char*) * count);
+
+  if (result) {
+    size_t index = 0;
+    char* token = strtok(str, delim);
+
+    while (token) {
+      *(result + index++) = strdup(token);
+      token = strtok(0, delim);
+    }
+    *(result + index) = 0;
+  }
+
+  return result;
+}
+
+void c_command(int argc, char* argv[]) {
+  if (argc > 2 && (strcmp(argv[1], "-c") == 0)) {
+    char** splitted = str_split(argv[2], ';');
+    int length = get_length(splitted) + 1;
+    for (int i = 0; i < length; i++) {
+      printf("%s ", splitted[i]);
+    }
+  }
+}
+
+int main(int argc, char* argv[]) {
   init_shell();
 
   simple_map_new(&variables);
@@ -653,6 +707,7 @@ int main(unused int argc, unused char* argv[]) {
   static char line[4096];
   int line_num = 0;
 
+  c_command(argc, argv);
   /* Please only print shell prompts when standard input is not a tty */
   if (shell_is_interactive) fprintf(stdout, "%d: ", line_num);
 
