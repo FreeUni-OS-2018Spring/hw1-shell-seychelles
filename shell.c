@@ -745,7 +745,7 @@ void c_command(int argc, char* argv[]) {
       buffer[str_len + 1] = '\0';
       struct command* executable = parse(buffer, &variables);
       execute_command(command_get_cmd(executable, 0), executable->background,
-                      executable->env_var_definition);
+                      executable->env_var_definition, 0);
     }
     exit(0);
   }
