@@ -699,12 +699,15 @@ void c_command(int argc, char* argv[]) {
     for (int i = 0; i < length; i++) {
       char buffer[4096];
       strcpy(buffer, splitted[i]);
+      int str_len = strlen(buffer);
+      buffer[str_len] = '\n';
+      buffer[str_len + 1] = '\0';
       struct command* executable = parse(buffer, &variables);
       execute_command(command_get_cmd(executable, 0), executable->background,
                       executable->env_var_definition);
     }
+    exit(0);
   }
-  exit(0);
 }
 
 int main(int argc, char* argv[]) {
