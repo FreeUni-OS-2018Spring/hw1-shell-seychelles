@@ -494,56 +494,8 @@ int cmd_type(char** command) {
   return 0;
 }
 
-
-int logical_operation(){
-	char* full_command="ls && echo 'success' && echo 'fail'";
-	int size=strlen(full_command);
-	int start=0;
-	bool last_logial_operator=false; // && TRUE || FALSE
-
-	for(int i=0;i<size-1;i++){
-		if((full_command[i]=='|' && full_command[i+1]=='|') || 
-			(full_command[i]=='&' && full_command[i+1]=='&')){
-
-			if(full_command[i]=='&'){
-				last_logial_operator=true;
-			}else{
-				last_logial_operator=false;
-			}
-			
-			char new_command[i-start];
-			new_command[i-start-1]='\0';
-			strncpy(new_command,&full_command[start],i-start-1);
-  			struct command* current_full_command = parse(new_command, &variables);
-  			int execute_code = execute_command(current_full_command);
-  			command_destroy(current_full_command); //free
-
-  			if(execute_code==0){ // execute command OK
-  				if(last_logial_operator==false){// &&
-  					return 0;
-  				} 
-  			}else{ // execute command ERROR
-  				if(last_logial_operator==true){// &&
-  					return 0;
-  				}
-  			}
-			start=i+3;
-		}
-	}
-
-	int last_size=strlen(full_command)-start+1;
-	char last_command [last_size];
-	last_command[last_size-1]='\0';
-	strncpy(last_command,&full_command[start], last_size-1);
-
-	struct command* current_full_command = parse(last_command, &variables);
-  	int current_command_execute_code=    execute_command(current_full_command);
-  	command_destroy(current_full_command); //free
-
-	return current_command_execute_code;
-}
-
-int redirected_execution(struct command* full_command, int inp_fd, int out_fd) {
+int redirected_execution(struct command* full_command, int inp_fd, int out_fd,
+                         int niceness) {
   int status = 1;
   int fds1[2];
   int fds2[2];
@@ -562,7 +514,8 @@ int redirected_execution(struct command* full_command, int inp_fd, int out_fd) {
       fprintf(stderr, "Creating child process failed\n");
       return 1;
     } else if (pid == 0) { /* Child Process */
-      if (i == 0) {        /* First process, only writes to pipe. */
+
+      if (i == 0) { /* First process, only writes to pipe. */
         if (full_command->cmds_length != 1) { /* Check for pipeless case */
           close(write_pipe[0]);
           dup2(write_pipe[1], STDOUT_FILENO);
@@ -589,13 +542,25 @@ int redirected_execution(struct command* full_command, int inp_fd, int out_fd) {
         dup2(write_pipe[1], 1);
       }
 
+      fprintf(stdout, "%s\n", "yleee");
       int fundex = lookup(args[0]);
       if (fundex >= 0) {
         int status = cmd_table[fundex].fun(args);
         exit(status);
+        fprintf(stdout, "%s/n", "yleee");
       } else {
+        fprintf(stdout, "%s/n", args[0]);
         char* program_path = find_program(args[0], 0, -1);
         if (program_path == NULL) exit(1);
+        errno = 0;
+        setpriority(PRIO_PROCESS, getpid(), niceness);
+        if (errno != 0) {
+          fprintf(stderr,
+                  "Setting priority failed,\nyou may not have permission to "
+                  "lower a process priority\n");
+          exit(1);
+        }
+        fprintf(stdout, "%s/n", args[0]);
         execv(program_path, args);
         exit(1);
       }
@@ -815,6 +780,31 @@ int main(int argc, char* argv[]) {
 
   while (fgets(line, 4096, stdin)) {
     /* Split our line into commands with it's arguments. */
+    int niceness = 0;
+    char** arguments = str_split(line, ' ');
+    if (!strcmp(arguments[0], "nice")) {
+      niceness = cmd_nice(arguments);
+      if (niceness == 0 || niceness < -21) {
+        if (shell_is_interactive)
+          /* Please only print shell prompts when standard input is not a
+           * tty */
+          fprintf(stdout, "%d: ", ++line_num);
+        continue;
+      } else if (niceness == -21) {
+        niceness = 10;
+        char* new_line = arguments[1];
+        for (int i = 2; i < get_length(arguments) + 1; i++) {
+          strcat(strcat(new_line, " "), arguments[i]);
+        }  // oih
+        strcpy(line, new_line);
+      } else {
+        char* new_line = arguments[3];
+        for (int i = 4; i < get_length(arguments) + 1; i++) {
+          strcat(strcat(new_line, " "), arguments[i]);
+        }
+        strcpy(line, new_line);
+      }
+    }
     struct command* full_command = parse(line, &variables);
 
     int inp_fd = STDIN_FILENO;
@@ -854,30 +844,10 @@ int main(int argc, char* argv[]) {
         }
 
         char** args = command_get_cmd(full_command, 0);
-        int niceness = 0;
-        if (!strcmp(args[0], "nice")) {
-          niceness = cmd_nice(args);
-          if (niceness == 0 || niceness < -21) {
-            if (shell_is_interactive)
-              /* Please only print shell prompts when standard input is not a
-               * tty */
-              fprintf(stdout, "%d: ", ++line_num);
-            continue;
-          } else if (niceness == -21) {
-            niceness = 10;
-            args = args + 1;
-          } else {
-            args = args + 3;
-          }
-          // fprintf(stdout, "%d\n", niceness);
-          // for (int i = 0; i < get_length(args) + 1; i++) {
-          //   fprintf(stdout, "%s\n", args[i]);
-          // }
-        }
 
         if (full_command->cmds_length > 1 ||
             is_redirection == 1) {  // Pipes and redirection.
-          redirected_execution(full_command, inp_fd, out_fd);
+          redirected_execution(full_command, inp_fd, out_fd, niceness);
           if (inp_fd != STDIN_FILENO) close(inp_fd);
           if (out_fd != STDOUT_FILENO) close(out_fd);
         } else if (is_redirection == 0) {
