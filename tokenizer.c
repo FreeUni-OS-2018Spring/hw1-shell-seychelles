@@ -21,8 +21,8 @@ static void *copy_word(char *source, size_t n) {
   return word;
 }
 
-struct command* parse(const char *line, simple_map* variables) {
-  if (line == NULL) {
+struct command* parse(const char *line, simple_map* variables, int i) {
+  if (line == NULL || strlen(line) == i) {
     return NULL;
   }
 
@@ -38,6 +38,8 @@ struct command* parse(const char *line, simple_map* variables) {
   cmds->append_to_file = 0;
   cmds->background = 0;
   cmds->env_var_definition = 0;
+  cmds->log_operator = -1;
+  cmds->logical_index = 0;
 
   const int MODE_NORMAL = 0,
         MODE_SQUOTE = 1,
@@ -50,7 +52,7 @@ struct command* parse(const char *line, simple_map* variables) {
   int output_filename = 0;
   int env_var = 0;
 
-  for (unsigned int i = 0; i < line_length; i++) {
+  for (; i < line_length; i++) {
     char c = line[i];
     
     if (mode == MODE_NORMAL) {
@@ -62,7 +64,7 @@ struct command* parse(const char *line, simple_map* variables) {
         if (i + 1 < line_length) {
           token[n++] = line[++i];
         }
-      } else if (isspace(c)) {
+      } else if (isspace(c) || i == line_length - 1) {
         if (n > 0) {
           if (input_filename == 1) {
             input_filename = 0;
@@ -94,6 +96,10 @@ struct command* parse(const char *line, simple_map* variables) {
           }
           n = 0;
         }
+      } else if (c == '|' && line[i + 1] == '|') {
+        cmds->log_operator = 1;
+        cmds->logical_index = i + 2;
+        break;
       } else if (c == '|') { // Pipe support.
         /* There must be some command before and after pipe operator */
         vector_push(&cmd, &cmd_len, NULL); // Append NULL terminator.
@@ -112,6 +118,10 @@ struct command* parse(const char *line, simple_map* variables) {
       } else if (c == '>') {
         /* There must be some command before redirect operator */
         output_filename = 1;
+      } else if (c == '&' && line[i + 1] == '&') {
+        cmds->log_operator = 0;
+        cmds->logical_index = i + 2;
+        break;
       } else if (c == '&') {
         /* This operator must be at the and of the line and separated with spaces */
         cmds->background = 1;
@@ -149,10 +159,6 @@ struct command* parse(const char *line, simple_map* variables) {
     if (n + 1 >= n_max) abort();
   }
 
-  if (n > 0) {
-    void *word = copy_word(token, n);
-    vector_push(&cmd, &cmd_len, word);
-  }
   if (cmd_len > 0) {
     vector_push(&cmd, &cmd_len, NULL); // Append NULL terminator.
     vector_push(&cmds->cmds, &cmds->cmds_length, cmd);

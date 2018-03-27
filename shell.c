@@ -50,7 +50,6 @@ int cmd_help(char** command);
 int cmd_pwd(char** command);
 int cmd_cd(char** command);
 int cmd_ulimit(char** command);
-int cmd_nice(char** command);
 int cmd_kill(char** command);
 int cmd_type(char** command);
 int cmd_echo(char** command);
@@ -74,7 +73,6 @@ fun_desc_t cmd_table[] = {
     {cmd_pwd, "pwd", "print working directory"},
     {cmd_cd, "cd", "change directory"},
     {cmd_ulimit, "ulimit", "modify shell resource limits"},
-    {cmd_nice, "nice", "run a command with a modified scheduling priority"},
     {cmd_kill, "kill", "send signal to a process"},
     {cmd_type, "type", "display information about command type"},
     {cmd_echo, "echo", "prints input to standard output"},
@@ -86,6 +84,12 @@ int cmd_help(unused char** command) {
   for (unsigned int i = 0; i < sizeof(cmd_table) / sizeof(fun_desc_t); i++)
     printf("%s - %s\n", cmd_table[i].cmd, cmd_table[i].doc);
   return 1;
+}
+
+void save_last_status(int status) {
+  char buffer[32];
+  sprintf(buffer, "%d", status);
+  simple_map_put(&variables, strdup("?"), strdup(buffer));
 }
 
 /* Exits this shell */
@@ -134,6 +138,7 @@ int cmd_wait(unused char** command) {
     wait(&status);
   }
   background_process_count = 0;
+  save_last_status(status);
   return status;
 }
 
@@ -494,8 +499,7 @@ int cmd_type(char** command) {
   return 0;
 }
 
-int redirected_execution(struct command* full_command, int inp_fd, int out_fd,
-                         int niceness) {
+int redirected_execution(struct command* full_command, int inp_fd, int out_fd) {
   int status = 1;
   int fds1[2];
   int fds2[2];
@@ -514,8 +518,7 @@ int redirected_execution(struct command* full_command, int inp_fd, int out_fd,
       fprintf(stderr, "Creating child process failed\n");
       return 1;
     } else if (pid == 0) { /* Child Process */
-
-      if (i == 0) { /* First process, only writes to pipe. */
+      if (i == 0) {        /* First process, only writes to pipe. */
         if (full_command->cmds_length != 1) { /* Check for pipeless case */
           close(write_pipe[0]);
           dup2(write_pipe[1], STDOUT_FILENO);
@@ -542,25 +545,13 @@ int redirected_execution(struct command* full_command, int inp_fd, int out_fd,
         dup2(write_pipe[1], 1);
       }
 
-      fprintf(stdout, "%s\n", "yleee");
       int fundex = lookup(args[0]);
       if (fundex >= 0) {
         int status = cmd_table[fundex].fun(args);
         exit(status);
-        fprintf(stdout, "%s/n", "yleee");
       } else {
-        fprintf(stdout, "%s/n", args[0]);
         char* program_path = find_program(args[0], 0, -1);
         if (program_path == NULL) exit(1);
-        errno = 0;
-        setpriority(PRIO_PROCESS, getpid(), niceness);
-        if (errno != 0) {
-          fprintf(stderr,
-                  "Setting priority failed,\nyou may not have permission to "
-                  "lower a process priority\n");
-          exit(1);
-        }
-        fprintf(stdout, "%s/n", args[0]);
         execv(program_path, args);
         exit(1);
       }
@@ -577,9 +568,9 @@ int redirected_execution(struct command* full_command, int inp_fd, int out_fd,
   }
   if (full_command->background == 0) {
     active_pgid = pgid;
-    for (size_t i = 0; i < full_command->cmds_length;
-         i++) /* Wait for all childs in pipe */
+    for (size_t i = 0; i < full_command->cmds_length; i++) /* Wait for all childs in pipe */
       waitpid(-pgid, &status, WSTOPPED);
+      save_last_status(status);
     active_pgid = -1;
   } else {
     background_process_count += full_command->cmds_length;
@@ -587,8 +578,7 @@ int redirected_execution(struct command* full_command, int inp_fd, int out_fd,
   return status;
 }
 
-int execute_command(char** args, int background, int env_var_definition,
-                    int niceness) {
+int execute_command(char** args, int background, int env_var_definition) {
   int status = 0;
   int fundex = lookup(args[0]); /* Find which built-in function to run. */
   if (fundex >= 0) {
@@ -605,14 +595,6 @@ int execute_command(char** args, int background, int env_var_definition,
       fprintf(stderr, "Creating child process failed\n");
       return 1;
     } else if (pid == 0) { /* Child Process */
-      errno = 0;
-      setpriority(PRIO_PROCESS, getpid(), niceness);
-      if (errno != 0) {
-        fprintf(stderr,
-                "Setting priority failed,\nyou may not have permission to "
-                "lower a process priority\n");
-        exit(1);
-      }
       execv(program_path, args);
       exit(1);
     } else { /* Parent Process */
@@ -621,6 +603,7 @@ int execute_command(char** args, int background, int env_var_definition,
         active_pid = pid;
         tcsetpgrp(shell_terminal, pid);
         waitpid(pid, &status, WSTOPPED);
+        save_last_status(status);
         tcsetpgrp(shell_terminal, shell_pgid);
         active_pid = -1;
       } else {
@@ -629,36 +612,6 @@ int execute_command(char** args, int background, int env_var_definition,
     }
   }
   return status;
-}
-
-int cmd_nice(char** command) {
-  errno = 0;
-  if (get_length(command) == 0) {
-    int prior = getpriority(PRIO_PROCESS, getpid());
-    if (errno != 0) {
-      return -100;
-    } else {
-      fprintf(stdout, "%d\n", prior);
-      return 0;
-    }
-  } else {
-    if (!strcmp(command[1], "-n")) {
-      if (get_length(command) > 2 && is_number(command[2])) {
-        int niceness = atoi(command[2]);
-        if (niceness >= -20 && niceness <= 19) {
-          return niceness;
-        } else {
-          fprintf(stdout, "%s\n", "niceness must be between -20 and 19");
-          return -100;
-        }
-      } else {
-        fprintf(stdout, "%s\n", "syntax error in passing arguments");
-        return -100;
-      }
-    } else {
-      return -21;
-    }
-  }
 }
 
 /* There's no handling for processes that were stopped */
@@ -670,7 +623,9 @@ void signal_handler(int signum) {
       killpg(active_pgid, signum);
     }
   } else if (signum == SIGCHLD) {
-    waitpid(-1, NULL, WSTOPPED);
+    int status = 1;
+    waitpid(-1, &status, WSTOPPED | WNOHANG);
+    save_last_status(status);
   }
 }
 
@@ -754,12 +709,9 @@ void c_command(int argc, char* argv[]) {
     for (int i = 0; i < length; i++) {
       char buffer[4096];
       strcpy(buffer, splitted[i]);
-      int str_len = strlen(buffer);
-      buffer[str_len] = '\n';
-      buffer[str_len + 1] = '\0';
-      struct command* executable = parse(buffer, &variables);
+      struct command* executable = parse(buffer, &variables, 0);
       execute_command(command_get_cmd(executable, 0), executable->background,
-                      executable->env_var_definition, 0);
+                      executable->env_var_definition);
     }
     exit(0);
   }
@@ -779,83 +731,72 @@ int main(int argc, char* argv[]) {
   if (shell_is_interactive) fprintf(stdout, "%d: ", line_num);
 
   while (fgets(line, 4096, stdin)) {
-    /* Split our line into commands with it's arguments. */
-    int niceness = 0;
-    char** arguments = str_split(line, ' ');
-    if (!strcmp(arguments[0], "nice")) {
-      niceness = cmd_nice(arguments);
-      if (niceness == 0 || niceness < -21) {
-        if (shell_is_interactive)
-          /* Please only print shell prompts when standard input is not a
-           * tty */
-          fprintf(stdout, "%d: ", ++line_num);
-        continue;
-      } else if (niceness == -21) {
-        niceness = 10;
-        char* new_line = arguments[1];
-        for (int i = 2; i < get_length(arguments) + 1; i++) {
-          strcat(strcat(new_line, " "), arguments[i]);
-        }  // oih
-        strcpy(line, new_line);
-      } else {
-        char* new_line = arguments[3];
-        for (int i = 4; i < get_length(arguments) + 1; i++) {
-          strcat(strcat(new_line, " "), arguments[i]);
-        }
-        strcpy(line, new_line);
-      }
-    }
-    struct command* full_command = parse(line, &variables);
 
     int inp_fd = STDIN_FILENO;
     int out_fd = STDOUT_FILENO;
     int is_redirection = 0;
+    struct command* full_command;
 
+    int parsing_index = 0;
     if (strcmp(line, "\n")) {
-      if (full_command != NULL) {  // Valid input
+      int status = 1;
+      while(1) {
+        /* Split our line into commands with it's arguments. */
+        full_command = parse(line, &variables, parsing_index);
 
-        if (full_command->inp_file != NULL) {  // Prepare file if neccessary
-          int fd = open(full_command->inp_file, O_RDONLY);
-          if (fd != -1) {
-            inp_fd = fd;
-            is_redirection = 1;
-          } else {
-            fprintf(stderr, "%s: could not open file\n",
-                    full_command->inp_file);
-            is_redirection = -1;
+        if (full_command != NULL) {  // Valid input
+
+          if (full_command->inp_file != NULL) {  // Prepare file if neccessary
+            int fd = open(full_command->inp_file, O_RDONLY);
+            if (fd != -1) {
+              inp_fd = fd;
+              is_redirection = 1;
+            } else {
+              fprintf(stderr, "%s: could not open file\n",
+                      full_command->inp_file);
+              is_redirection = -1;
+            }
           }
-        }
-        if (full_command->out_file != NULL) {  // Prepare file if neccessary
-          mode_t f_mode = S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP | S_IROTH;
-          int f_flags;
-          if (full_command->append_to_file == 1)
-            f_flags = O_WRONLY | O_CREAT | O_APPEND;
-          else
-            f_flags = O_WRONLY | O_CREAT | O_TRUNC;
-          int fd = open(full_command->out_file, f_flags, f_mode);
-          if (fd != -1) {
-            out_fd = fd;
-            is_redirection = 1;
-          } else {
-            fprintf(stderr, "%s: could not open file\n",
-                    full_command->out_file);
-            is_redirection = -1;
+          if (full_command->out_file != NULL) {  // Prepare file if neccessary
+            mode_t f_mode = S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP | S_IROTH;
+            int f_flags;
+            if (full_command->append_to_file == 1)
+              f_flags = O_WRONLY | O_CREAT | O_APPEND;
+            else
+              f_flags = O_WRONLY | O_CREAT | O_TRUNC;
+            int fd = open(full_command->out_file, f_flags, f_mode);
+            if (fd != -1) {
+              out_fd = fd;
+              is_redirection = 1;
+            } else {
+              fprintf(stderr, "%s: could not open file\n",
+                      full_command->out_file);
+              is_redirection = -1;
+            }
           }
-        }
 
-        char** args = command_get_cmd(full_command, 0);
+          if (full_command->cmds_length > 1 || is_redirection == 1) {  // Pipes and redirection.
+            status = redirected_execution(full_command, inp_fd, out_fd);
+            if (inp_fd != STDIN_FILENO) close(inp_fd);
+            if (out_fd != STDOUT_FILENO) close(out_fd);
+          } else if (is_redirection == 0) { 
+            char** args = command_get_cmd(full_command, 0);
+            status = execute_command(args, full_command->background,
+                            full_command->env_var_definition);
+          }
 
-        if (full_command->cmds_length > 1 ||
-            is_redirection == 1) {  // Pipes and redirection.
-          redirected_execution(full_command, inp_fd, out_fd, niceness);
-          if (inp_fd != STDIN_FILENO) close(inp_fd);
-          if (out_fd != STDOUT_FILENO) close(out_fd);
-        } else if (is_redirection == 0) {
-          execute_command(args, full_command->background,
-                          full_command->env_var_definition, niceness);
+          parsing_index = full_command->logical_index;
+          while ((status == 0 && full_command->log_operator == 1) || (status != 0 && full_command->log_operator == 0)) {
+            command_destroy(full_command);
+            full_command = parse(line, &variables, parsing_index);
+            parsing_index = full_command->logical_index;
+          }
+          command_destroy(full_command);
+          if(parsing_index == 0) break;
+        } else {
+          fprintf(stderr, "Syntax error!\n");
+          break;
         }
-      } else {
-        fprintf(stderr, "Syntax error!\n");
       }
     }
 
@@ -864,7 +805,7 @@ int main(int argc, char* argv[]) {
       fprintf(stdout, "%d: ", ++line_num);
 
     /* Clean up memory */
-    command_destroy(full_command);
+    //command_destroy(full_command);
   }
 
   return 0;
